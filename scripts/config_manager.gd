@@ -19,7 +19,7 @@ var read_text_color: Color = Color(0.68, 0.92, 1.0, 1.0)
 var text_speed: float = 60.0 # 每秒字符数（<=0 或 >=115 表示极速显示）
 var auto_delay: float = 1.6
 var voice_stop_mode: int = 1 # 0: 单击时停止, 1: 播放下一句声音时停止
-var skip_unread: bool = false # false: 仅已读, true: 全部
+var skip_unread: bool = true # false: 仅已读, true: 全部
 var skip_continue_mode: int = 0 # 0: 总是继续, 1: 选择支为止, 2: 一天结束时
 var auto_click_mode: int = 1 # 0: 结束自动模式, 1: 文字显示
 
@@ -95,7 +95,7 @@ func reset_to_defaults() -> void:
 	text_speed = 60.0
 	auto_delay = 1.6
 	voice_stop_mode = 1
-	skip_unread = false
+	skip_unread = true
 	skip_continue_mode = 0
 	auto_click_mode = 1
 

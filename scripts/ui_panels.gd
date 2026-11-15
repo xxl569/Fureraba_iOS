@@ -100,6 +100,9 @@ var face_avatar_rect: TextureRect
 var bgm_telop_banner: Panel
 var bgm_telop_label: Label
 var _telop_tween: Tween
+var _notice_banner: Panel
+var _notice_label: Label
+var _notice_tween: Tween
 var quick_menu: Control
 var btn_auto: BaseButton
 var btn_skip: BaseButton
@@ -202,9 +205,19 @@ func _init() -> void:
 	z_index = 300
 	_build_dialogue_box()
 	_build_bgm_telop_banner()
+	_build_notice_banner()
 	_build_quick_menu()
 	_build_title_overlay()
 	_build_modals()
+
+
+func _exit_tree() -> void:
+	if _telop_tween != null and _telop_tween.is_valid():
+		_telop_tween.kill()
+	_telop_tween = null
+	if _notice_tween != null and _notice_tween.is_valid():
+		_notice_tween.kill()
+	_notice_tween = null
 
 
 func _process(delta: float) -> void:
@@ -445,6 +458,7 @@ func show_title_menu(has_movie: bool) -> void:
 
 func hide_title_menu() -> void:
 	title_overlay.visible = false
+	_close_all_modals()
 	_sys_in_game = true
 	quick_menu.visible = true
 
@@ -562,16 +576,44 @@ func update_nude_indicator(enabled: bool) -> void:
 
 func set_auto_state(enabled: bool) -> void:
 	if btn_auto != null:
-		btn_auto.button_pressed = enabled
+		btn_auto.set_pressed_no_signal(enabled)
 	_auto_badge.visible = enabled
 	_update_badge_fallback()
 
 
 func set_skip_state(enabled: bool) -> void:
 	if btn_skip != null:
-		btn_skip.button_pressed = enabled
+		btn_skip.set_pressed_no_signal(enabled)
 	_skip_badge.visible = enabled
 	_update_badge_fallback()
+
+
+func show_notice(msg: String, duration_sec: float = 2.4) -> void:
+	## 在屏幕上方展示非阻塞状态提示（例如“仅已读模式下不可跳过未读对白”）。
+	if _notice_banner == null or _notice_label == null or msg.is_empty():
+		return
+	_notice_label.text = msg
+	_notice_banner.visible = true
+	_notice_banner.modulate.a = 1.0
+	if _notice_tween != null and _notice_tween.is_valid():
+		_notice_tween.kill()
+	if is_inside_tree():
+		_notice_tween = create_tween()
+		_notice_tween.tween_interval(maxf(0.5, duration_sec))
+		_notice_tween.tween_property(_notice_banner, "modulate:a", 0.0, 0.35)
+		_notice_tween.tween_callback(func() -> void: _notice_banner.visible = false)
+
+
+func is_point_in_quick_menu_buttons(global_pos: Vector2) -> bool:
+	## 判断坐标是否落在右下角快捷按钮区域内，用于阻止触摸抬起穿透触发推进或打断跳过。
+	if quick_menu == null or not quick_menu.is_visible_in_tree():
+		return false
+	for child in quick_menu.get_children():
+		if child is BaseButton and child.visible:
+			var rect := (child as Control).get_global_rect()
+			if rect.has_point(global_pos):
+				return true
+	return false
 
 
 func _update_badge_fallback() -> void:
@@ -664,6 +706,8 @@ func has_open_modal() -> bool:
 		or sys_menu_panel.visible
 		or log_panel.visible
 		or gallery_panel.visible
+		or (choice_panel != null and choice_panel.visible)
+		or (byoa_panel != null and byoa_panel.visible)
 		or _confirm_overlay.visible
 		or (_name_input_overlay != null and _name_input_overlay.visible)
 		or (_prologue_skip_overlay != null and _prologue_skip_overlay.visible)
@@ -854,6 +898,9 @@ func _build_dialogue_box() -> void:
 
 	var click_handler := func(ev: InputEvent) -> void:
 		if ev is InputEventMouseButton and ev.pressed:
+			# 忽略触控模拟产生的鼠标点击，防止与 MobileGestureHelper 双发跳句或打断快进
+			if ev.device == MobileGestureHelper.DEVICE_ID_EMULATION:
+				return
 			if ev.button_index == MOUSE_BUTTON_LEFT:
 				advance_requested.emit()
 				var vp := get_viewport()
@@ -918,6 +965,30 @@ func _build_bgm_telop_banner() -> void:
 	bgm_telop_banner.add_child(bgm_telop_label)
 
 
+func _build_notice_banner() -> void:
+	_notice_banner = Panel.new()
+	_notice_banner.name = "NoticeBanner"
+	_notice_banner.position = Vector2(300, 18)
+	_notice_banner.size = Vector2(680, 40)
+	_notice_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_notice_banner.visible = false
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.14, 0.20, 0.30, 0.90)
+	sb.border_color = Color(0.95, 0.78, 0.36, 0.90)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(8)
+	_notice_banner.add_theme_stylebox_override("panel", sb)
+	add_child(_notice_banner)
+
+	_notice_label = Label.new()
+	_notice_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_notice_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_notice_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_notice_label.add_theme_font_size_override("font_size", 17)
+	_notice_label.add_theme_color_override("font_color", Color(1.0, 0.96, 0.82))
+	_notice_banner.add_child(_notice_label)
+
+
 func _build_quick_menu() -> void:
 	# 1:1 还原 PC 截图 QQ20261115-124219.png 右下角三层金字塔圆形快捷按钮簇
 	quick_menu = Control.new()
@@ -970,6 +1041,7 @@ func _build_quick_menu() -> void:
 	# 第 3 层 (y=122): 历史 (LOG), ♥ (F12 透视/收藏), Q.S, Q.L
 	var btn_log := _make_pill_btn("历史", Vector2(54, 38))
 	btn_log.position = Vector2(12, 126)
+	btn_log.focus_mode = Control.FOCUS_NONE
 	btn_log.pressed.connect(_open_log_panel)
 	quick_menu.add_child(btn_log)
 
@@ -977,6 +1049,7 @@ func _build_quick_menu() -> void:
 	btn_nude_quick.name = "BtnHeartNude"
 	btn_nude_quick.text = "♥"
 	btn_nude_quick.toggle_mode = true
+	btn_nude_quick.focus_mode = Control.FOCUS_NONE
 	btn_nude_quick.position = Vector2(74, 124)
 	btn_nude_quick.size = Vector2(44, 42)
 	btn_nude_quick.add_theme_font_size_override("font_size", 22)
@@ -1013,6 +1086,8 @@ func _make_round_icon_btn(node_name: String, fallback_txt: String, toggle: bool 
 	var b := TextureButton.new()
 	b.name = node_name
 	b.toggle_mode = toggle
+	# 禁用焦点获取，避免点击快捷按钮后按下空格/回车再次误触按钮本身
+	b.focus_mode = Control.FOCUS_NONE
 	b.custom_minimum_size = Vector2(46, 46)
 	b.ignore_texture_size = true
 	b.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED

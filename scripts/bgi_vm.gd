@@ -35,6 +35,7 @@ var current_script: String = ""
 var _insns: Array = []
 var _offset_to_idx: Dictionary = {}
 var _strings: Dictionary = {}
+var _local_labels: Dictionary = {}
 var _ip: int = 0
 var _sp: int = 0x10000
 var _retval: Variant = 0
@@ -224,6 +225,18 @@ func load_script(name: String) -> Dictionary:
 		})
 		pc += 1 + nargs
 
+	var local_labels: Dictionary = {}
+	for i in range(insns.size() - 3):
+		var i0: Dictionary = insns[i]
+		var i1: Dictionary = insns[i + 1]
+		var i2: Dictionary = insns[i + 2]
+		var i3: Dictionary = insns[i + 3]
+		if int(i0["op"]) == 0x03 and int(i1["op"]) == 0xF7 and int(i2["op"]) == 0x01 and int(i3["op"]) == 0x19:
+			var urel := int(i0["a0"]) & 0xFFFFFFFF
+			var lbl := str(strings.get(urel, ""))
+			if not lbl.is_empty():
+				local_labels[lbl] = int(i2["a0"])
+
 	var parsed := {
 		"name": name,
 		"imports": imports,
@@ -231,6 +244,7 @@ func load_script(name: String) -> Dictionary:
 		"insns": insns,
 		"offset_to_idx": offset_to_idx,
 		"strings": strings,
+		"local_labels": local_labels,
 	}
 	_script_cache[key] = parsed
 
@@ -263,8 +277,30 @@ func start_script(name: String, entry_offset: int = 0, reset_state: bool = true)
 	_insns = sc["insns"]
 	_offset_to_idx = sc["offset_to_idx"]
 	_strings = sc["strings"]
+	_local_labels = sc.get("local_labels", {})
 	_ip = int(_offset_to_idx.get(entry_offset, 0))
 	vm_script_changed.emit(name)
+	return true
+
+
+func push_script_return_frame(ret_script: String, ret_offset: int) -> bool:
+	## 压入一个指定脚本字节偏移的返回帧（用于跳过片头过场后仍能沿流程图返回继续后续章节）。
+	var sc := load_script(ret_script)
+	if sc.is_empty():
+		return false
+	var off_map: Dictionary = sc["offset_to_idx"]
+	if not off_map.has(ret_offset):
+		return false
+	_call_stack.append({
+		"script": ret_script,
+		"insns": sc["insns"],
+		"offset_to_idx": off_map,
+		"strings": sc["strings"],
+		"local_labels": sc.get("local_labels", {}),
+		"ip": int(off_map[ret_offset]),
+		"sp": _sp,
+		"exc_stack": [] as Array[int],
+	})
 	return true
 
 
@@ -471,10 +507,12 @@ func _exec_one() -> void:
 			current_line = a1
 		0x0F0: # CALL_SCRIPT
 			var target_sc := str(_pop_any())
-			if _vfs != null and _vfs.has_entry(target_sc):
-				_push_call_frame(_ip + 1)
-				start_script(target_sc, 0, false)
-				return
+			if _vfs != null:
+				var resolved := target_sc if _vfs.has_entry(target_sc) else target_sc.to_lower()
+				if _vfs.has_entry(resolved):
+					_push_call_frame(_ip + 1)
+					start_script(resolved.to_lower(), 0, false)
+					return
 		0x0F3: # JUMP_SCRIPT
 			var arg0 = _pop_any()
 			var target_sc := ""
@@ -482,16 +520,27 @@ func _exec_one() -> void:
 				target_sc = str(_pop_any())
 			else:
 				target_sc = str(arg0)
-			if _vfs != null and _vfs.has_entry(target_sc):
-				start_script(target_sc, 0, false)
-				return
-		0x0F6: # CALL/JUMP_PREP（弹出参数个数 argc，保留目标脚本名给紧随其后的 0xF0/0xF3）
-			var _argc := _pop_int()
-			# 若存在附加参数则保留目标脚本名在栈顶
-			if _argc > 0 and _data_stack.size() > _argc:
-				var _script_name = _pop_any()
-				_pop_n(_argc)
-				_data_stack.append(_script_name)
+			if _vfs != null:
+				var resolved := target_sc if _vfs.has_entry(target_sc) else target_sc.to_lower()
+				if _vfs.has_entry(resolved):
+					start_script(resolved.to_lower(), 0, false)
+					return
+		0x0F6: # CALL/JUMP_PREP 或本地标签调用
+			if not _data_stack.is_empty() and typeof(_data_stack.back()) == TYPE_STRING:
+				var lbl := str(_pop_any())
+				if _local_labels.has(lbl) and _ip + 2 < _insns.size() and int(_insns[_ip + 1]["op"]) == 0x01 and int(_insns[_ip + 2]["op"]) == 0x1A:
+					var target_off := int(_local_labels[lbl])
+					if _offset_to_idx.has(target_off):
+						_push_call_frame(_ip + 3)
+						_ip = int(_offset_to_idx[target_off])
+						return
+			else:
+				var _argc := _pop_int()
+				# 若存在附加参数则保留目标脚本名在栈顶
+				if _argc > 0 and _data_stack.size() > _argc:
+					var _script_name = _pop_any()
+					_pop_n(_argc)
+					_data_stack.append(_script_name)
 		0x0F4: # EXIT_VM
 			wait_state = WaitState.ENDED
 			vm_ended.emit()
@@ -563,10 +612,13 @@ func _handle_scope_mark(cmd_id: int, args: Array) -> void:
 		# 读取全局流程标志
 		var idx := int(args[0])
 		_data_stack.append(int(flags.get(idx, 0)))
-	elif cmd_id == 228 and args.size() >= 2:
+	elif (cmd_id == 224 or cmd_id == 228 or cmd_id == 230) and args.size() >= 2:
 		# 写入全局流程标志
 		var idx := int(args[0])
 		flags[idx] = int(args[1])
+	elif cmd_id == 227 and args.size() >= 1:
+		# 获取全局阈/系统计数并压栈，防止 CMP_GE/CMP_LT 栈下溢
+		_data_stack.append(int(args[0]))
 	elif cmd_id == 392 and args.size() >= 2:
 		# SetMusicTelop(id, bgm_name, ...)
 		music_telop[str(args[1])] = int(args[0])
@@ -787,6 +839,8 @@ func _handle_builtin_external(fn_name: String) -> void:
 			_pop_all_frame_args(2)
 		"_Font":
 			_pop_all_frame_args(3)
+		"AutoSave":
+			_pop_all_frame_args(1)
 		_:
 			unknown_externals[fn_name] = int(unknown_externals.get(fn_name, 0)) + 1
 			_data_stack.append(0)
@@ -821,6 +875,7 @@ func _push_call_frame(ret_ip: int) -> void:
 		"insns": _insns,
 		"offset_to_idx": _offset_to_idx,
 		"strings": _strings,
+		"local_labels": _local_labels,
 		"ip": ret_ip,
 		"sp": _sp,
 		"exc_stack": _exc_stack.duplicate(),
@@ -835,6 +890,7 @@ func _pop_call_frame() -> bool:
 	_insns = frame["insns"]
 	_offset_to_idx = frame["offset_to_idx"]
 	_strings = frame["strings"]
+	_local_labels = frame.get("local_labels", {})
 	_ip = int(frame["ip"])
 	_sp = int(frame["sp"])
 	_exc_stack = frame["exc_stack"]
@@ -867,11 +923,19 @@ func _read_ascii_cstr(raw: PackedByteArray, pos: int) -> Dictionary:
 
 
 func export_save_state() -> Dictionary:
+	var cs_out: Array = []
+	for fr in _call_stack:
+		cs_out.append({
+			"script": str(fr.get("script", "")),
+			"ip": int(fr.get("ip", 0)),
+			"sp": int(fr.get("sp", 0x10000)),
+		})
 	return {
 		"current_script": current_script,
 		"ip": _ip,
 		"sp": _sp,
 		"flags": flags.duplicate(true),
+		"call_stack": cs_out,
 		"last_dialogue_text": last_dialogue_text,
 		"last_speaker": last_speaker,
 		"last_bg": last_bg,
@@ -890,7 +954,29 @@ func import_save_state(state: Dictionary) -> bool:
 	_sp = int(state.get("sp", 0x10000))
 	var f: Variant = state.get("flags", {})
 	if typeof(f) == TYPE_DICTIONARY:
-		flags = f.duplicate(true)
+		flags.clear()
+		for fk in f.keys():
+			var ikey: Variant = int(fk) if (typeof(fk) == TYPE_STRING and str(fk).is_valid_int()) else fk
+			flags[ikey] = f[fk]
+	var cs_in: Variant = state.get("call_stack", [])
+	if typeof(cs_in) == TYPE_ARRAY:
+		for fr in cs_in:
+			if typeof(fr) != TYPE_DICTIONARY:
+				continue
+			var fsc_name := str(fr.get("script", ""))
+			var fsc := load_script(fsc_name)
+			if fsc.is_empty():
+				continue
+			_call_stack.append({
+				"script": fsc_name,
+				"insns": fsc["insns"],
+				"offset_to_idx": fsc["offset_to_idx"],
+				"strings": fsc["strings"],
+				"local_labels": fsc.get("local_labels", {}),
+				"ip": int(fr.get("ip", 0)),
+				"sp": int(fr.get("sp", 0x10000)),
+				"exc_stack": [] as Array[int],
+			})
 	last_dialogue_text = str(state.get("last_dialogue_text", ""))
 	last_speaker = str(state.get("last_speaker", ""))
 	last_bg = str(state.get("last_bg", ""))

@@ -127,6 +127,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if not _in_game or gesture_helper == null:
 		return
+	if event is InputEventScreenTouch and ui != null and ui.is_point_in_quick_menu_buttons(event.position):
+		return
 	gesture_helper.block_advance = ui.has_open_modal() or video_player.visible
 	gesture_helper.is_auto_or_skip_active = _auto_mode or _skip_mode
 	if not gesture_helper.block_advance and event.is_action_pressed("ui_accept"):
@@ -151,7 +153,7 @@ func _is_key_name_pressed(key_name: String) -> bool:
 		"SPACE":
 			return Input.is_key_pressed(KEY_SPACE)
 		"ENTER", "RETURN":
-			return Input.is_key_pressed(KEY_ENTER)
+			return Input.is_key_pressed(KEY_ENTER) or Input.is_key_pressed(KEY_KP_ENTER)
 		_:
 			var kc := OS.find_keycode_from_string(k)
 			return kc != KEY_NONE and Input.is_key_pressed(kc)
@@ -260,24 +262,32 @@ func _process(delta: float) -> void:
 		_end_recollection_to_gallery()
 		return
 
+	var qkey := str(cfg.key_bindings.get("quick_skip", "Ctrl")) if cfg != null else "Ctrl"
+	var ctrl_held := not ui.has_open_modal() and _is_key_name_pressed(qkey)
+	var line_read := bp_vm != null and bp_vm.is_line_read(vm.current_script, vm.current_line)
+	var allow_skip := (cfg != null and cfg.skip_unread) or line_read
+
 	if vm.wait_state == BgiVm.WaitState.TIMER:
-		vm.wait_timer_sec -= delta
+		if (_skip_mode and allow_skip) or ctrl_held:
+			vm.wait_timer_sec = 0.0
+		else:
+			vm.wait_timer_sec -= delta
 		if vm.wait_timer_sec <= 0.0:
 			vm.resume_from_click()
 			vm.step_until_wait()
 	elif vm.wait_state == BgiVm.WaitState.CLICK:
-		var qkey := str(cfg.key_bindings.get("quick_skip", "Ctrl")) if cfg != null else "Ctrl"
-		var ctrl_held := not ui.has_open_modal() and _is_key_name_pressed(qkey)
-		if _skip_mode or ctrl_held:
-			var allow_skip := cfg.skip_unread or bp_vm.is_line_read(vm.current_script, vm.current_line)
-			if allow_skip or ctrl_held:
+		if _skip_mode and not allow_skip and not ctrl_held and not ui.has_open_modal():
+			_set_skip_mode(false)
+			ui.show_notice("当前为「仅已读」模式，未读对白无法快进（可按住 Ctrl 跳过或在文本设置改为「全部」）")
+		elif (_skip_mode and allow_skip) or ctrl_held:
+			if not ui.has_open_modal():
 				_skip_accum += delta
 				if _skip_accum >= 0.06:
 					_skip_accum = 0.0
+					if ui.is_typing():
+						ui.finish_typing()
 					_advance_dialogue()
-			else:
-				_set_skip_mode(false)
-		elif _auto_mode and not ui.is_typing():
+		elif _auto_mode and not ui.is_typing() and not ui.has_open_modal():
 			_auto_accum += delta
 			if _auto_accum >= cfg.auto_delay:
 				_auto_accum = 0.0
@@ -344,7 +354,7 @@ func _connect_signals() -> void:
 		_resume_skip_after_choice = false
 		vm.resume_with_choice(idx)
 		vm.step_until_wait()
-		if resume_skip and cfg != null and cfg.skip_continue_mode == 0:
+		if resume_skip and cfg != null and cfg.skip_continue_mode == 0 and vm.wait_state != BgiVm.WaitState.CHOICE:
 			_set_skip_mode(true)
 	)
 	ui.nude_quick_toggled.connect(_on_toggle_nude)
@@ -462,9 +472,7 @@ func _on_new_game_confirmed(skip_prologue: bool, family_name: String, given_name
 	_set_auto_mode(false)
 	_set_skip_mode(false)
 	stage.clear_all_bustshots()
-	var entry := "b_days_0422" if (skip_prologue and vfs.has_entry("b_days_0422")) else "a_prologue01"
-	vm.start_script(entry, 0, true)
-	vm.step_until_wait()
+	_start_story_flow(skip_prologue)
 
 
 func start_new_game() -> void:
@@ -478,7 +486,35 @@ func start_new_game() -> void:
 	_set_auto_mode(false)
 	_set_skip_mode(false)
 	stage.clear_all_bustshots()
-	vm.start_script("a_prologue01", 0, true)
+	_start_story_flow(false)
+
+
+func _start_story_flow(skip_prologue: bool) -> void:
+	## 经由 root_common 主流程图调度启动，以完整支持序章 -> 分支 -> 日常广场 -> SelectTalk 的全流程衔接。
+	if vfs.has_entry("root_common"):
+		if skip_prologue:
+			# 先压入 Loop_main(2316) 返回帧并从调用 B_days_0422(12280) 启动，既直达日常第一句又保留后续流程接续
+			vm.start_script("root_common", 12280, true)
+			vm.flags.clear()
+			vm.flags[55] = 1
+			vm.flags[56] = 1
+			vm.flags[57] = 1
+			vm.flags[58] = 1
+			vm.flags[60] = 1
+			vm.flags[61] = 25
+			vm.flags[62] = 25
+			vm.push_script_return_frame("root_common", 2316)
+		else:
+			vm.start_script("root_common", 312, true)
+			vm.flags.clear()
+			vm.flags[55] = 1
+			vm.flags[56] = 1
+			vm.flags[57] = 1
+			vm.flags[58] = 1
+	else:
+		vm.flags.clear()
+		var entry := "b_days_0422" if (skip_prologue and vfs.has_entry("b_days_0422")) else "a_prologue01"
+		vm.start_script(entry, 0, true)
 	vm.step_until_wait()
 
 
@@ -518,12 +554,33 @@ func _advance_dialogue() -> void:
 
 
 func _set_auto_mode(on: bool) -> void:
+	if on and _skip_mode:
+		_skip_mode = false
+		_skip_accum = 0.0
+		ui.set_skip_state(false)
 	_auto_mode = on
 	_auto_accum = 0.0
 	ui.set_auto_state(on)
 
 
 func _set_skip_mode(on: bool) -> void:
+	if on:
+		var qkey := str(cfg.key_bindings.get("quick_skip", "Ctrl")) if cfg != null else "Ctrl"
+		var ctrl_held := _is_key_name_pressed(qkey)
+		var line_read := bp_vm != null and vm != null and bp_vm.is_line_read(vm.current_script, vm.current_line)
+		var allow_skip := (cfg == null or cfg.skip_unread) or line_read or ctrl_held
+		if _in_game and vm != null and vm.wait_state == BgiVm.WaitState.CLICK and not allow_skip:
+			_skip_mode = false
+			_skip_accum = 0.0
+			ui.set_skip_state(false)
+			ui.show_notice("当前为「仅已读」模式，未读对白无法快进（可按住 Ctrl 跳过或在文本设置改为「全部」）")
+			return
+		if _auto_mode:
+			_auto_mode = false
+			_auto_accum = 0.0
+			ui.set_auto_state(false)
+		if ui.is_typing():
+			ui.finish_typing()
 	_skip_mode = on
 	_skip_accum = 0.0
 	ui.set_skip_state(on)
@@ -620,6 +677,8 @@ func _restore_from_snapshot(payload: Dictionary) -> void:
 		ui.hide_title_menu()
 		_in_game = true
 		_in_recollection = false
+		_set_auto_mode(false)
+		_set_skip_mode(false)
 		stage.clear_all_bustshots()
 		if not vm.last_bg.is_empty():
 			stage.show_background(vm.last_bg)

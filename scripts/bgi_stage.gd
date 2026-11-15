@@ -101,10 +101,10 @@ func show_background(img_name: String) -> bool:
 	node.position = Vector2.ZERO
 	node.visible = true
 	_layer_asset_names[0] = img_name
-	if is_new and is_inside_tree() and screen_effect_mode < 2:
+	if is_new and node.is_inside_tree() and screen_effect_mode < 2:
 		var dur := 0.22 if screen_effect_mode == 0 else 0.08
 		node.modulate.a = 0.0
-		var tw := create_tween()
+		var tw := node.create_tween()
 		tw.tween_property(node, "modulate:a", 1.0, dur)
 	else:
 		node.modulate.a = 1.0
@@ -248,13 +248,13 @@ func refresh_nude_layers() -> void:
 
 
 func trigger_quake(amplitude: float = 12.0, duration: float = 0.35) -> void:
-	if screen_effect_mode >= 2:
+	if screen_effect_mode >= 2 or not _layers_root.is_inside_tree():
 		_layers_root.position = Vector2.ZERO
 		return
 	var dur := duration if screen_effect_mode == 0 else duration * 0.45
 	if _quake_tween != null and _quake_tween.is_valid():
 		_quake_tween.kill()
-	_quake_tween = create_tween()
+	_quake_tween = _layers_root.create_tween()
 	var steps := 6
 	var step_dt := dur / float(steps)
 	for i in range(steps):
@@ -285,9 +285,9 @@ func handle_stage_command(cmd: String, args: Array) -> void:
 				var sc := clampf(scale_pct / 100.0, 0.5, 4.0)
 				var ms := int(args[7]) if args.size() >= 8 else 300
 				bg_node.pivot_offset = Vector2(clampf(cx, 0.0, LOGICAL_SIZE.x), clampf(cy, 0.0, LOGICAL_SIZE.y))
-				if is_inside_tree() and screen_effect_mode < 2 and ms > 0:
+				if bg_node.is_inside_tree() and screen_effect_mode < 2 and ms > 0:
 					var dur := clampf(float(ms) / 1000.0, 0.05, 2.0) * (1.0 if screen_effect_mode == 0 else 0.45)
-					var tw := create_tween()
+					var tw := bg_node.create_tween()
 					tw.tween_property(bg_node, "scale", Vector2(sc, sc), dur)
 				else:
 					bg_node.scale = Vector2(sc, sc)
@@ -309,7 +309,7 @@ func handle_stage_command(cmd: String, args: Array) -> void:
 				rect.z_index = 250
 				rect.color = Color(r, g, b, 0.0)
 				_layers_root.add_child(rect)
-				var tw := create_tween()
+				var tw := rect.create_tween()
 				for _i in range(cnt):
 					tw.tween_property(rect, "color:a", max_a, half_dur)
 					tw.tween_property(rect, "color:a", 0.0, half_dur)
@@ -334,13 +334,13 @@ func handle_stage_command(cmd: String, args: Array) -> void:
 							clear_layer(lid)
 						elif _layer_nodes.has(lid):
 							var target_a := clampf(float(alpha) / 100.0, 0.0, 1.0)
-							if is_inside_tree() and screen_effect_mode < 2:
-								var n: Control = _layer_nodes[lid]
+							var n: Control = _layer_nodes[lid]
+							if n.is_inside_tree() and screen_effect_mode < 2:
 								n.modulate.a = 0.0
-								var tw := create_tween()
+								var tw := n.create_tween()
 								tw.tween_property(n, "modulate:a", target_a, 0.16 if screen_effect_mode == 0 else 0.06)
 							else:
-								_layer_nodes[lid].modulate.a = target_a
+								n.modulate.a = target_a
 		"_FadeBS":
 			if args.size() >= 2:
 				var lid := maxi(int(args[0]), 1)
@@ -349,11 +349,12 @@ func handle_stage_command(cmd: String, args: Array) -> void:
 					clear_layer(lid)
 				elif _layer_nodes.has(lid):
 					var target_a := clampf(float(alpha) / 100.0, 0.0, 1.0)
-					if is_inside_tree() and screen_effect_mode < 2:
-						var tw := create_tween()
-						tw.tween_property(_layer_nodes[lid], "modulate:a", target_a, 0.16 if screen_effect_mode == 0 else 0.06)
+					var n: Control = _layer_nodes[lid]
+					if n.is_inside_tree() and screen_effect_mode < 2:
+						var tw := n.create_tween()
+						tw.tween_property(n, "modulate:a", target_a, 0.16 if screen_effect_mode == 0 else 0.06)
 					else:
-						_layer_nodes[lid].modulate.a = target_a
+						n.modulate.a = target_a
 		"_MoveBS":
 			if args.size() >= 5:
 				var lid := maxi(int(args[0]), 1)
@@ -364,8 +365,8 @@ func handle_stage_command(cmd: String, args: Array) -> void:
 				if _layer_nodes.has(lid) and _layer_nodes[lid] is TextureRect:
 					var tr := _layer_nodes[lid] as TextureRect
 					var target_pos := _calc_bustshot_pos(tr.size, bgi_x, bgi_y)
-					if is_inside_tree() and screen_effect_mode < 2:
-						var tw := create_tween()
+					if tr.is_inside_tree() and screen_effect_mode < 2:
+						var tw := tr.create_tween()
 						tw.tween_property(tr, "position", target_pos, 0.22 if screen_effect_mode == 0 else 0.08)
 					else:
 						tr.position = target_pos

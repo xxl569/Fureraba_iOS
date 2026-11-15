@@ -99,7 +99,23 @@ func _init() -> void:
 		quit(8)
 		return
 
+	# 8. 校验鼠标模拟触控事件 (DEVICE_ID_EMULATION) 不会穿透触发 tap_advance / stop_auto_or_skip
+	gh.is_auto_or_skip_active = true
+	var emu_d := InputEventScreenTouch.new(); emu_d.device = MobileGestureHelper.DEVICE_ID_EMULATION; emu_d.index = 0; emu_d.pressed = true; emu_d.position = Vector2(200, 200)
+	var emu_u := InputEventScreenTouch.new(); emu_u.device = MobileGestureHelper.DEVICE_ID_EMULATION; emu_u.index = 0; emu_u.pressed = false; emu_u.position = Vector2(200, 200)
+	var prev_taps: int = st["advances"]
+	var prev_stops: int = st["stops"]
+	gh.handle_input_event(emu_d); gh.handle_input_event(emu_u)
+	if st["advances"] != prev_taps or st["stops"] != prev_stops:
+		push_error("Emulated ScreenTouch leaked into tap_advance or stop_auto_or_skip")
+		gh.queue_free()
+		ui.queue_free()
+		await process_frame
+		quit(9)
+		return
+
 	gh.queue_free()
 	ui.queue_free()
+	await process_frame
 	print("STEP4_2_GESTURES_AND_SMEE_UI_OK")
 	quit(0)

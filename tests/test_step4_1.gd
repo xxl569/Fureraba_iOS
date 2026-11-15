@@ -36,5 +36,6 @@ func _init() -> void:
 		return
 
 	main.queue_free()
+	await process_frame
 	print("STEP4_1_MAIN_UI_SAVELOAD_OK")
 	quit(0)

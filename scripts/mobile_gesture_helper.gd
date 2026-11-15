@@ -39,6 +39,9 @@ func handle_input_event(event: InputEvent) -> bool:
 		return false
 
 	if event is InputEventScreenTouch:
+		# 过滤由鼠标模拟产生的触摸事件，避免 Windows 端重复触发或打断自动/快进
+		if event.device == DEVICE_ID_EMULATION:
+			return false
 		var idx: int = event.index
 		if event.pressed:
 			_touches[idx] = event.position
@@ -71,6 +74,8 @@ func handle_input_event(event: InputEvent) -> bool:
 		return true
 
 	if event is InputEventScreenDrag:
+		if event.device == DEVICE_ID_EMULATION:
+			return false
 		_touches[event.index] = event.position
 		if _touches.size() == 1 and event.position.distance_to(_touch_start_pos) > 36.0:
 			_gesture_moved = true

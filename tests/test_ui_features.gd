@@ -460,9 +460,62 @@ func _init() -> void:
 		push_error("Gallery CG viewer did not close on ESC")
 		quit(54)
 		return
+	main.ui._close_all_modals()
+
+	# 24. 验证快进按钮防焦点、默认跳过未读、R 快捷键与仅已读未读提示
+	main.cfg.reset_to_defaults()
+	if not main.cfg.skip_unread:
+		push_error("Default skip_unread should be true")
+		quit(55)
+		return
+	if main.ui.btn_skip.focus_mode != Control.FOCUS_NONE or main.ui.btn_auto.focus_mode != Control.FOCUS_NONE:
+		push_error("QuickMenu Auto/Skip buttons must use FOCUS_NONE")
+		quit(56)
+		return
+	main.start_new_game()
+	main._set_skip_mode(true)
+	if not main._skip_mode or not main.ui.btn_skip.button_pressed:
+		push_error("_set_skip_mode(true) failed")
+		quit(57)
+		return
+	var sk_ip0: int = main.vm._ip
+	main._process(0.08)
+	if main.vm._ip <= sk_ip0:
+		push_error("Skip mode did not advance dialogue on _process")
+		quit(58)
+		return
+	main.vm.wait_state = main.vm.WaitState.TIMER
+	main.vm.wait_timer_sec = 3.0
+	main._process(0.02)
+	if main.vm.wait_timer_sec > 0.0:
+		push_error("Skip mode did not fast-forward WaitState.TIMER")
+		quit(59)
+		return
+	main._set_skip_mode(false)
+	var kev_r := InputEventKey.new()
+	kev_r.keycode = KEY_R
+	kev_r.pressed = true
+	main._unhandled_input(kev_r)
+	if not main._skip_mode:
+		push_error("Pressing R did not activate skip mode")
+		quit(60)
+		return
+	main._set_skip_mode(false)
+	var bk_bits: Dictionary = main.bp_vm._read_bits.duplicate(true)
+	main.bp_vm._read_bits.clear()
+	main.cfg.skip_unread = false
+	main.vm.wait_state = main.vm.WaitState.CLICK
+	main._set_skip_mode(true)
+	if main._skip_mode or not main.ui._notice_banner.visible:
+		push_error("Unread skip_unread=false should stay off and display notice banner")
+		quit(61)
+		return
+	main.bp_vm._read_bits = bk_bits
+	main.bp_vm._read_dirty = false
 
 	main.cfg.reset_to_defaults()
 	main.cfg.save_config()
 	main.queue_free()
+	await process_frame
 	print("STEP6_UI_FEATURES_OK")
 	quit(0)

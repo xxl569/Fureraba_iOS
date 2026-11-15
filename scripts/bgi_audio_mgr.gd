@@ -73,6 +73,14 @@ func load_ogg_stream(entry_name: String) -> Dictionary:
 	}
 
 
+func _exit_tree() -> void:
+	# 退出树时主动停止并释放流引用，避免 ObjectDB 实例泄漏警告
+	for p in [bgm_player, se_player, voice_player]:
+		if p != null:
+			p.stop()
+			p.stream = null
+
+
 func play_bgm(entry_name: String) -> bool:
 	var res := load_ogg_stream(entry_name)
 	if not bool(res.get("ok", false)):
@@ -80,8 +88,9 @@ func play_bgm(entry_name: String) -> bool:
 	var stream: AudioStreamOggVorbis = res["stream"]
 	current_bgm = entry_name
 	current_bgm_loop = bool(res["loop"])
+	bgm_player.stop()
 	bgm_player.stream = stream
-	if is_inside_tree():
+	if is_inside_tree() and DisplayServer.get_name() != "headless":
 		bgm_player.play()
 	bgm_started.emit(entry_name)
 	return true
@@ -89,11 +98,13 @@ func play_bgm(entry_name: String) -> bool:
 
 func stop_bgm() -> void:
 	bgm_player.stop()
+	bgm_player.stream = null
 	current_bgm = ""
 
 
 func stop_voice() -> void:
 	voice_player.stop()
+	voice_player.stream = null
 
 
 func play_se(entry_name: String) -> bool:
@@ -102,8 +113,9 @@ func play_se(entry_name: String) -> bool:
 		return false
 	var stream: AudioStreamOggVorbis = res["stream"]
 	stream.loop = false
+	se_player.stop()
 	se_player.stream = stream
-	if is_inside_tree():
+	if is_inside_tree() and DisplayServer.get_name() != "headless":
 		se_player.play()
 	return true
 
@@ -118,8 +130,9 @@ func play_voice(entry_name: String) -> bool:
 	if _cfg != null:
 		var v_mult := _cfg.get_char_voice_multiplier(entry_name)
 		voice_player.volume_db = _linear_to_db_safe(_cfg.voice_volume * v_mult)
+	voice_player.stop()
 	voice_player.stream = stream
-	if is_inside_tree():
+	if is_inside_tree() and DisplayServer.get_name() != "headless":
 		voice_player.play()
 	return true
 
