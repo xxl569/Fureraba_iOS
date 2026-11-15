@@ -47,6 +47,7 @@ var wait_state: int = WaitState.NONE
 var wait_timer_sec: float = 0.0
 var last_dialogue_text: String = ""
 var last_speaker: String = ""
+var last_voice_entry: String = ""
 var last_bg: String = ""
 var last_bgm: String = ""
 var current_line: int = 0
@@ -219,6 +220,8 @@ func start_script(name: String, entry_offset: int = 0, reset_state: bool = true)
 
 func resume_from_click() -> void:
 	if wait_state == WaitState.CLICK or wait_state == WaitState.TIMER:
+		if wait_state == WaitState.CLICK:
+			last_voice_entry = ""
 		wait_state = WaitState.NONE
 		wait_timer_sec = 0.0
 
@@ -552,6 +555,8 @@ func _handle_builtin_external(fn_name: String) -> void:
 			audio_command.emit(fn_name, args)
 		"_PlayVoice":
 			var args := _pop_all_frame_args(4)
+			if args.size() >= 1:
+				last_voice_entry = str(args[0])
 			audio_command.emit(fn_name, args)
 		"_FadeSE", "_WaitToFinishSE":
 			var args := _pop_all_frame_args(2)

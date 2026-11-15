@@ -12,6 +12,8 @@ var voice_volume: float = 1.00
 var text_speed: float = 60.0 # 每秒字符数（<=0 表示瞬间显示）
 var auto_delay: float = 1.6
 var skip_unread: bool = false
+var dialogue_opacity: float = 0.92
+var confirm_dialogs: bool = true
 
 var custom_game_dir: String = ""
 var custom_movie_dir: String = ""
@@ -32,6 +34,8 @@ func load_config() -> void:
 				text_speed = float(parsed.get("text_speed", text_speed))
 				auto_delay = clampf(float(parsed.get("auto_delay", auto_delay)), 0.3, 5.0)
 				skip_unread = bool(parsed.get("skip_unread", skip_unread))
+				dialogue_opacity = clampf(float(parsed.get("dialogue_opacity", dialogue_opacity)), 0.2, 1.0)
+				confirm_dialogs = bool(parsed.get("confirm_dialogs", confirm_dialogs))
 				custom_game_dir = str(parsed.get("custom_game_dir", ""))
 				custom_movie_dir = str(parsed.get("custom_movie_dir", ""))
 	_apply_cmdline_args()
@@ -47,6 +51,8 @@ func save_config() -> void:
 		"text_speed": text_speed,
 		"auto_delay": auto_delay,
 		"skip_unread": skip_unread,
+		"dialogue_opacity": dialogue_opacity,
+		"confirm_dialogs": confirm_dialogs,
 		"custom_game_dir": custom_game_dir,
 		"custom_movie_dir": custom_movie_dir,
 	}

@@ -61,6 +61,41 @@ func _notification(what: int) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		var kc: int = event.keycode
+		if kc == KEY_F12:
+			_on_toggle_nude()
+			get_viewport().set_input_as_handled()
+			return
+		if kc == KEY_ESCAPE:
+			if ui.has_open_modal() and not ui.title_overlay.visible:
+				ui._close_all_modals()
+			elif _in_game:
+				ui.open_system_menu("display", true)
+			get_viewport().set_input_as_handled()
+			return
+		if _in_game and not ui.has_open_modal() and not video_player.visible:
+			if kc == KEY_H:
+				ui.toggle_dialogue_visibility()
+				get_viewport().set_input_as_handled()
+				return
+			elif kc == KEY_A:
+				_set_auto_mode(not _auto_mode)
+				get_viewport().set_input_as_handled()
+				return
+			elif kc == KEY_SPACE:
+				_set_skip_mode(not _skip_mode)
+				get_viewport().set_input_as_handled()
+				return
+			elif kc == KEY_L:
+				ui.open_log_panel()
+				get_viewport().set_input_as_handled()
+				return
+			elif kc == KEY_R:
+				_replay_voice("")
+				get_viewport().set_input_as_handled()
+				return
+
 	if not _in_game or gesture_helper == null:
 		return
 	gesture_helper.block_advance = ui.has_open_modal() or video_player.visible
@@ -82,16 +117,18 @@ func _process(delta: float) -> void:
 			vm.resume_from_click()
 			vm.step_until_wait()
 	elif vm.wait_state == BgiVm.WaitState.CLICK:
-		if _skip_mode:
+		# Ctrl 键按住时临时快进
+		var ctrl_held := not ui.has_open_modal() and Input.is_key_pressed(KEY_CTRL)
+		if _skip_mode or ctrl_held:
 			var allow_skip := cfg.skip_unread or bp_vm.is_line_read(vm.current_script, vm.current_line)
-			if allow_skip:
+			if allow_skip or ctrl_held:
 				_skip_accum += delta
 				if _skip_accum >= 0.06:
 					_skip_accum = 0.0
 					_advance_dialogue()
 			else:
 				_set_skip_mode(false)
-		elif _auto_mode:
+		elif _auto_mode and not ui.is_typing():
 			_auto_accum += delta
 			if _auto_accum >= cfg.auto_delay:
 				_auto_accum = 0.0
@@ -100,7 +137,8 @@ func _process(delta: float) -> void:
 
 func _connect_signals() -> void:
 	vm.dialogue_printed.connect(func(text: String, speaker: String, _w: bool) -> void:
-		ui.set_dialogue(text, speaker)
+		var snap := vm.export_save_state() if DisplayServer.get_name() != "headless" else {}
+		ui.set_dialogue(text, speaker, vm.last_voice_entry, snap)
 	)
 	vm.stage_command.connect(stage.handle_stage_command)
 	vm.audio_command.connect(audio_mgr.handle_audio_command)
@@ -115,6 +153,14 @@ func _connect_signals() -> void:
 	ui.skip_toggled.connect(_set_skip_mode)
 	ui.save_slot_requested.connect(_on_save_slot)
 	ui.load_slot_requested.connect(_on_load_slot)
+	ui.quick_save_requested.connect(func() -> void: _on_save_slot(UiPanels.QUICK_SAVE_SLOT))
+	ui.quick_load_requested.connect(func() -> void: _on_load_slot(UiPanels.QUICK_SAVE_SLOT))
+	ui.voice_replay_requested.connect(_replay_voice)
+	ui.quick_jump_requested.connect(_on_quick_jump)
+	ui.return_to_title_requested.connect(_return_to_title)
+	ui.quit_game_requested.connect(func() -> void: get_tree().quit())
+	ui.gallery_play_bgm_requested.connect(func(entry: String) -> void: audio_mgr.play_bgm(entry))
+	ui.gallery_stop_bgm_requested.connect(func() -> void: audio_mgr.stop_bgm())
 	ui.config_changed.connect(_on_config_changed)
 	ui.rescan_byoa_requested.connect(_try_mount_and_init)
 	ui.start_new_game_requested.connect(start_new_game)
@@ -124,7 +170,7 @@ func _connect_signals() -> void:
 		vm.step_until_wait()
 	)
 	ui.nude_quick_toggled.connect(_on_toggle_nude)
-	gesture_helper.tap_advance.connect(_advance_dialogue)
+	gesture_helper.tap_advance.connect(_on_user_advance)
 	gesture_helper.stop_auto_or_skip.connect(func() -> void:
 		_set_auto_mode(false)
 		_set_skip_mode(false)
@@ -134,7 +180,7 @@ func _connect_signals() -> void:
 	gesture_helper.swipe_open_log.connect(ui.open_log_panel)
 	video_player.video_finished.connect(func() -> void:
 		if not _in_game:
-			ui.show_title_menu(not vfs.get_movie_path("friendtolover.ogv").is_empty())
+			_show_title_screen()
 	)
 
 
@@ -145,15 +191,34 @@ func _try_mount_and_init() -> void:
 		audio_mgr.setup(vfs, cfg)
 		bp_vm.load_gdb_from_vfs("BGI.gdb")
 		bp_vm.set_nude_mode(cfg.nude_mode)
-		ui.setup(cfg, vfs.loaded_font)
+		ui.setup(cfg, vfs.loaded_font, vfs)
 		ui.update_nude_indicator(cfg.nude_mode)
 		vm.start_script("setup")
 		vm.step_until_wait(5000)
 		if not _in_game:
-			ui.show_title_menu(not vfs.get_movie_path("friendtolover.ogv").is_empty())
+			_show_title_screen()
 	else:
-		ui.setup(cfg, null)
+		ui.setup(cfg, null, null)
 		ui.show_byoa_guide(vfs.get_byoa_guide_text())
+
+
+func _show_title_screen() -> void:
+	ui.show_title_menu(not vfs.get_movie_path("friendtolover.ogv").is_empty())
+	if DisplayServer.get_name() != "headless":
+		if audio_mgr.current_bgm.is_empty():
+			audio_mgr.play_bgm("FL_bgm_01")
+		var voices := ["TITLE_HI", "TITLE_MI", "TITLE_RI", "TITLE_YU"]
+		audio_mgr.play_voice(voices[randi() % voices.size()])
+
+
+func _return_to_title() -> void:
+	_in_game = false
+	_set_auto_mode(false)
+	_set_skip_mode(false)
+	stage.clear_all_bustshots()
+	audio_mgr.voice_player.stop()
+	audio_mgr.stop_bgm()
+	_show_title_screen()
 
 
 func start_new_game() -> void:
@@ -170,6 +235,7 @@ func start_new_game() -> void:
 func _play_opening_movie() -> void:
 	var ogv := vfs.get_movie_path("friendtolover.ogv")
 	if not ogv.is_empty():
+		audio_mgr.stop_bgm()
 		ui.hide_title_menu()
 		video_player.play_ogv(ogv)
 
@@ -179,6 +245,9 @@ func _on_user_advance() -> void:
 		_set_auto_mode(false)
 	if _skip_mode:
 		_set_skip_mode(false)
+	if ui.is_typing():
+		ui.finish_typing()
+		return
 	_advance_dialogue()
 
 
@@ -221,28 +290,50 @@ func _on_config_changed() -> void:
 		stage.refresh_nude_layers()
 
 
+func _replay_voice(voice_entry: String) -> void:
+	var target := voice_entry if not voice_entry.is_empty() else vm.last_voice_entry
+	if not target.is_empty():
+		audio_mgr.play_voice(target)
+
+
 func _on_save_slot(slot: int) -> void:
 	if not _in_game:
 		return
 	var payload := vm.export_save_state()
 	payload["read_state"] = bp_vm.export_read_state()
 	payload["timestamp"] = Time.get_datetime_string_from_system()
-	ui.save_game_to_slot(slot, payload)
+	var shot: Image = null
+	if DisplayServer.get_name() != "headless" and get_viewport() != null:
+		var tex := get_viewport().get_texture()
+		if tex != null:
+			shot = tex.get_image()
+	ui.save_game_to_slot(slot, payload, shot)
 
 
 func _on_load_slot(slot: int) -> void:
 	var payload := ui.load_game_from_slot(slot)
 	if payload.is_empty():
 		return
+	_restore_from_snapshot(payload)
+
+
+func _on_quick_jump(snapshot: Dictionary) -> void:
+	if snapshot.is_empty():
+		return
+	_restore_from_snapshot(snapshot)
+
+
+func _restore_from_snapshot(payload: Dictionary) -> void:
 	var rs: Variant = payload.get("read_state", {})
 	if typeof(rs) == TYPE_DICTIONARY:
 		bp_vm.import_read_state(rs)
 	if vm.import_save_state(payload):
 		ui.hide_title_menu()
 		_in_game = true
+		stage.clear_all_bustshots()
 		if not vm.last_bg.is_empty():
 			stage.show_background(vm.last_bg)
 		if not vm.last_bgm.is_empty():
 			audio_mgr.play_bgm(vm.last_bgm)
 		if not vm.last_dialogue_text.is_empty():
-			ui.set_dialogue(vm.last_dialogue_text, vm.last_speaker)
+			ui.set_dialogue(vm.last_dialogue_text, vm.last_speaker, vm.last_voice_entry, payload)

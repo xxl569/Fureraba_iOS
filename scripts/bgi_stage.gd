@@ -91,11 +91,18 @@ func show_background(img_name: String) -> bool:
 	var tex := get_texture_cached(img_name)
 	if tex == null:
 		return false
+	var is_new := str(_layer_asset_names.get(0, "")) != img_name
 	var node := _ensure_texture_layer(0, 0)
 	node.texture = tex
 	node.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	node.visible = true
 	_layer_asset_names[0] = img_name
+	if is_new and is_inside_tree():
+		node.modulate.a = 0.0
+		var tw := create_tween()
+		tw.tween_property(node, "modulate:a", 1.0, 0.22)
+	else:
+		node.modulate.a = 1.0
 	return true
 
 
