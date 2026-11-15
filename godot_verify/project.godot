@@ -1,0 +1,24 @@
+; Engine configuration file.
+; 阶段一 Godot 4.3 运行时基础环境最小验证工程
+
+config_version=5
+
+[application]
+
+config/name="Fureraba_Phase1_Verify"
+config/description="阶段一运行时验证：VideoStreamTheora (.ogv) / GalHei.ttf / nudeprcs._bp 双层立绘叠加"
+run/main_scene="res://verify_phase1.tscn"
+config/features=PackedStringArray("4.3", "GL Compatibility")
+boot_splash/show_image=false
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

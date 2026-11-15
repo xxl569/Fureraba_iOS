@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Godot 4 editor/import cache & local Windows toolchains
+.godot/
+godot_verify/.godot/
+bin/*.dll
+bin/*.a
+bin/*.dylib
+bin/*.so
+bin/*.o
+tools/godot/
+tools/ldid/
+tools/mingw_compat/
+
+# Build & IPA artifacts
+build/
+Payload/
+artifacts/
+reports/
+*.ipa
+*.pck
+*.zip
+
+# Runtime saves & logs
+saves/
+logs/
+
+# 严禁将原版游戏封包、音频、转码视频或解包临时资产提交到 Git 仓库
+*.arc
+*.arc.bak
+*.bak
+*.gdb
+*.ogv
+*.mpg
+*.mpeg
+*.dat
+*.ogg
+*.wav
+*.dll
+*.exe
+Archive/
+Backup/
+UserData/
+extracted/
+movie/
+tmp/
+temp/
+
+# Xcode
+DerivedData/
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcuserstate
+project.xcworkspace/
+xcuserdata/
+
+.DS_Store
+Thumbs.db
