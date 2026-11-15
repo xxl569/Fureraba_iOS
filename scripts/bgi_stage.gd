@@ -99,7 +99,7 @@ func show_background(img_name: String) -> bool:
 	return true
 
 
-func show_bustshot(layer_id: int, img_name: String, pos_x: float = 0.0, pos_y: float = 0.0, face_name: String = "") -> bool:
+func show_bustshot(layer_id: int, img_name: String, bgi_x: float = 0.0, bgi_y: float = 250.0, face_name: String = "") -> bool:
 	var lid := clampi(layer_id, 1, MAX_LAYERS - 1)
 	var body_name := img_name
 	if body_name.is_empty():
@@ -114,11 +114,12 @@ func show_bustshot(layer_id: int, img_name: String, pos_x: float = 0.0, pos_y: f
 	node.texture = tex
 	var tex_sz := tex.get_size()
 	node.size = tex_sz
-	node.position = Vector2((LOGICAL_SIZE.x - tex_sz.x) * 0.5 + pos_x, pos_y)
+	node.position = _calc_bustshot_pos(tex_sz, bgi_x, bgi_y)
 	node.modulate.a = 1.0
 	node.visible = true
 	_layer_asset_names[lid] = body_name
 	_layer_face_names[lid] = face_name
+	_layer_bgi_pos[lid] = Vector2(bgi_x, bgi_y)
 
 	var face_node := node.get_node_or_null("FaceOverlay") as TextureRect
 	if not face_name.is_empty():
@@ -190,10 +191,11 @@ func refresh_nude_layers() -> void:
 		else:
 			var ctrl: Control = _layer_nodes.get(lid)
 			if ctrl is TextureRect:
-				var tex_sz := (ctrl as TextureRect).size
-				var offset_x := ctrl.position.x - (LOGICAL_SIZE.x - tex_sz.x) * 0.5
+				var prev_alpha := ctrl.modulate.a
+				var bgi_pos: Vector2 = _layer_bgi_pos.get(lid, Vector2(0.0, 250.0))
 				var face_name := str(_layer_face_names.get(lid, ""))
-				show_bustshot(int(lid), asset_name, offset_x, ctrl.position.y, face_name)
+				if show_bustshot(int(lid), asset_name, bgi_pos.x, bgi_pos.y, face_name):
+					ctrl.modulate.a = prev_alpha
 
 
 func trigger_quake(amplitude: float = 12.0, duration: float = 0.35) -> void:
@@ -224,15 +226,12 @@ func handle_stage_command(cmd: String, args: Array) -> void:
 				var lid := maxi(int(args[0]), 1)
 				var bname := str(args[1]) if typeof(args[1]) == TYPE_STRING else ""
 				var fname := str(args[2]) if args.size() >= 3 and typeof(args[2]) == TYPE_STRING else ""
-				var prev_bgi: Vector2 = _layer_bgi_pos.get(lid, Vector2(250.0, 0.0))
-				var raw_x := int(args[6]) if args.size() >= 7 else BGI_UNCHANGED
-				var raw_y := int(args[7]) if args.size() >= 8 else BGI_UNCHANGED
-				var bgi_x := float(raw_x) if raw_x != BGI_UNCHANGED else prev_bgi.x
-				var bgi_y := float(raw_y) if raw_y != BGI_UNCHANGED else prev_bgi.y
-				_layer_bgi_pos[lid] = Vector2(bgi_x, bgi_y)
-				var offset_x := (bgi_x - 250.0) * (LOGICAL_SIZE.x / 500.0)
-				var offset_y := bgi_y * (LOGICAL_SIZE.y / 375.0)
-				if show_bustshot(lid, bname, offset_x, offset_y, fname):
+				var prev_bgi: Vector2 = _layer_bgi_pos.get(lid, Vector2(0.0, 250.0))
+				var raw_x := int(args[5]) if args.size() >= 6 else BGI_UNCHANGED
+				var raw_y := int(args[6]) if args.size() >= 7 else BGI_UNCHANGED
+				var bgi_x := _resolve_bgi_coord(raw_x, prev_bgi.x)
+				var bgi_y := _resolve_bgi_coord(raw_y, prev_bgi.y)
+				if show_bustshot(lid, bname, bgi_x, bgi_y, fname):
 					if args.size() >= 12:
 						var alpha := int(args[11])
 						if alpha <= 0:
@@ -248,19 +247,15 @@ func handle_stage_command(cmd: String, args: Array) -> void:
 				elif _layer_nodes.has(lid):
 					_layer_nodes[lid].modulate.a = clampf(float(alpha) / 100.0, 0.0, 1.0)
 		"_MoveBS":
-			if args.size() >= 6:
+			if args.size() >= 5:
 				var lid := maxi(int(args[0]), 1)
-				var prev_bgi: Vector2 = _layer_bgi_pos.get(lid, Vector2(250.0, 0.0))
-				var raw_x := int(args[4])
-				var raw_y := int(args[5])
-				var bgi_x := float(raw_x) if raw_x != BGI_UNCHANGED else prev_bgi.x
-				var bgi_y := float(raw_y) if raw_y != BGI_UNCHANGED else prev_bgi.y
+				var prev_bgi: Vector2 = _layer_bgi_pos.get(lid, Vector2(0.0, 250.0))
+				var bgi_x := _resolve_bgi_coord(int(args[3]), prev_bgi.x)
+				var bgi_y := _resolve_bgi_coord(int(args[4]), prev_bgi.y)
 				_layer_bgi_pos[lid] = Vector2(bgi_x, bgi_y)
 				if _layer_nodes.has(lid) and _layer_nodes[lid] is TextureRect:
 					var tr := _layer_nodes[lid] as TextureRect
-					var offset_x := (bgi_x - 250.0) * (LOGICAL_SIZE.x / 500.0)
-					var offset_y := bgi_y * (LOGICAL_SIZE.y / 375.0)
-					tr.position = Vector2((LOGICAL_SIZE.x - tr.size.x) * 0.5 + offset_x, offset_y)
+					tr.position = _calc_bustshot_pos(tr.size, bgi_x, bgi_y)
 		"_ClearBS":
 			clear_all_bustshots()
 		"_DrawSPR":
@@ -276,6 +271,26 @@ func handle_stage_command(cmd: String, args: Array) -> void:
 
 func get_active_layer_count() -> int:
 	return _layer_nodes.size()
+
+
+func _calc_bustshot_pos(tex_sz: Vector2, bgi_x: float, bgi_y: float) -> Vector2:
+	# BGI 以屏幕中心 (640, 360) 与立绘中心为基准，直接叠加像素偏移量
+	return Vector2(
+		LOGICAL_SIZE.x * 0.5 + bgi_x - tex_sz.x * 0.5,
+		LOGICAL_SIZE.y * 0.5 + bgi_y - tex_sz.y * 0.5
+	)
+
+
+func _resolve_bgi_coord(raw: int, prev_val: float) -> float:
+	# BGI 高 4 位为 0x1 表示相对当前坐标偏移（低 28 位为有符号补码），0x10000000 即偏移 0（不变）
+	if raw == BGI_UNCHANGED:
+		return prev_val
+	if (raw & 0xF0000000) == BGI_UNCHANGED:
+		var delta := raw & 0x0FFFFFFF
+		if (delta & 0x08000000) != 0:
+			delta -= 0x10000000
+		return prev_val + float(delta)
+	return float(raw)
 
 
 func _ensure_texture_layer(lid: int, z: int) -> TextureRect:

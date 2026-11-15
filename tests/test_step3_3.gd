@@ -72,6 +72,38 @@ func _init() -> void:
 		return
 	vplayer.stop_video()
 
+	# 6. 立绘 _DrawBS / _MoveBS / _FadeBS 坐标与表情合成验证
+	stage.handle_stage_command("_DrawBS", [4, "GE01SW_N", "GE01_N026", 0, 2, 288, 250, 268435456, 0, 0, 0, 100, 0, -1, -1, 0, 0, -1, 200, 0, 1])
+	stage.handle_stage_command("_DrawBS", [5, "MO01SW_N", "MO01_N003", 0, 2, -288, 250, 268435456, 0, 0, 0, 100, 0, -1, -1, 0, 0, -1, 200, 0, 1])
+	var node_r := stage._layer_nodes.get(4) as TextureRect
+	var node_l := stage._layer_nodes.get(5) as TextureRect
+	if node_r == null or node_l == null:
+		push_error("Dual bustshot layers missing")
+		quit(8)
+		return
+	var face_r := node_r.get_node_or_null("FaceOverlay") as TextureRect
+	if face_r == null or not face_r.visible:
+		push_error("FaceOverlay missing or invisible")
+		quit(9)
+		return
+	if absf(node_r.position.x - 288.0) > 1.0 or absf(node_l.position.x + 288.0) > 1.0 or absf(node_r.position.y - 62.5) > 1.0:
+		push_error("Bustshot positions incorrect: R=%s L=%s" % [str(node_r.position), str(node_l.position)])
+		quit(10)
+		return
+	# _MoveBS 相对 X 偏移 (+50 -> 268435506) 与绝对 Y (225)
+	stage.handle_stage_command("_MoveBS", [5, 0, 0, 268435506, 225, 268435456, 0, 268435456, -1, 25, 0, 1])
+	if absf(node_l.position.x - (-238.0)) > 1.0 or absf(node_l.position.y - 37.5) > 1.0:
+		push_error("_MoveBS relative/absolute move incorrect: L=%s" % str(node_l.position))
+		quit(11)
+		return
+	# _FadeBS alpha=0 清除图层
+	stage.handle_stage_command("_FadeBS", [4, 0, 2, 268435456, 268435456, 268435456, 268435456, 200, 1])
+	if stage._layer_nodes.has(4):
+		push_error("_FadeBS alpha=0 did not clear layer 4")
+		quit(12)
+		return
+	stage.clear_all_bustshots()
+
 	stage.queue_free()
 	audio_mgr.queue_free()
 	vplayer.queue_free()
