@@ -31,6 +31,11 @@ func handle_input_event(event: InputEvent) -> bool:
 			return true
 		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			return _handle_single_tap()
+		if event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+			if block_advance:
+				return false
+			two_finger_toggle_ui.emit()
+			return true
 		return false
 
 	if event is InputEventScreenTouch:

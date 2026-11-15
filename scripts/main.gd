@@ -23,6 +23,7 @@ var _in_game: bool = false
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cfg = ConfigManager.new()
 	cfg.load_config()
 
@@ -64,6 +65,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	gesture_helper.block_advance = ui.has_open_modal() or video_player.visible
 	gesture_helper.is_auto_or_skip_active = _auto_mode or _skip_mode
+	if not gesture_helper.block_advance and event.is_action_pressed("ui_accept"):
+		_on_user_advance()
+		get_viewport().set_input_as_handled()
+		return
 	if gesture_helper.handle_input_event(event):
 		get_viewport().set_input_as_handled()
 

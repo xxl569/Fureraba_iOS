@@ -21,13 +21,14 @@ func _init() -> void:
 	var bg := ColorRect.new()
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bg.color = Color.BLACK
-	bg.mouse_filter = Control.MOUSE_FILTER_STOP
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
 	_player = VideoStreamPlayer.new()
 	_player.name = "VideoStreamPlayer"
 	_player.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_player.expand = true
+	_player.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_player.finished.connect(_on_finished)
 	add_child(_player)
 

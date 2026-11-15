@@ -78,12 +78,15 @@ static func _score_table(raw: PackedByteArray, table: PackedInt32Array, is_gbk: 
 			var cp := table[idx] if idx < table.size() else 0
 			if cp > 0:
 				score += 2
-				# 简体中文常用区 (GB2312 0xB0..0xF7, 0xA1..0xFE) 加权
-				if is_gbk and b0 >= 0xB0 and b0 <= 0xF7 and b1 >= 0xA1 and b1 <= 0xFE:
+				# 简体中文常用区 (GB2312 0xB0..0xF7, 0xA1..0xFE) 与 GB2312 全角标点 (0xA1..0xA9) 加权
+				if is_gbk and ((b0 >= 0xB0 and b0 <= 0xF7 and b1 >= 0xA1 and b1 <= 0xFE) or (b0 >= 0xA1 and b0 <= 0xA9 and b1 >= 0xA1 and b1 <= 0xFE)):
 					score += 2
 				# 日文平假名/片假名 (0x829F..0x8396) 加权
 				elif (not is_gbk) and ((b0 == 0x82 and b1 >= 0x9F) or b0 == 0x83):
 					score += 3
+				# Shift-JIS 全角标点 (0x81) 与 JIS 一级汉字 (0x88..0x9F) 适度加权，避免被 GBK 生僻扩展区抢占
+				elif (not is_gbk) and (b0 == 0x81 or (b0 >= 0x88 and b0 <= 0x9F)):
+					score += 1
 				i += 2
 				continue
 		score -= 10
