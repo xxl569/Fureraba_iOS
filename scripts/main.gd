@@ -435,6 +435,7 @@ func _start_recollection(script_name: String, appearance_mode: int) -> void:
 	_in_recollection = true
 	_set_auto_mode(false)
 	_set_skip_mode(false)
+	audio_mgr.stop_voice()
 	vm.player_family_name = cfg.player_family_name
 	vm.player_given_name = cfg.player_given_name
 	vm.start_script(script_name, 0, true)
@@ -473,6 +474,7 @@ func _on_new_game_confirmed(skip_prologue: bool, family_name: String, given_name
 	_set_auto_mode(false)
 	_set_skip_mode(false)
 	stage.clear_all_bustshots()
+	audio_mgr.stop_voice()
 	_start_story_flow(skip_prologue)
 
 
@@ -487,6 +489,7 @@ func start_new_game() -> void:
 	_set_auto_mode(false)
 	_set_skip_mode(false)
 	stage.clear_all_bustshots()
+	audio_mgr.stop_voice()
 	_start_story_flow(false)
 
 
@@ -522,6 +525,7 @@ func _start_story_flow(skip_prologue: bool) -> void:
 func _play_opening_movie() -> void:
 	var ogv := vfs.get_movie_path("friendtolover.ogv")
 	if not ogv.is_empty():
+		audio_mgr.stop_voice()
 		audio_mgr.stop_bgm()
 		ui.hide_title_menu()
 		video_player.play_ogv(ogv)
@@ -680,6 +684,7 @@ func _restore_from_snapshot(payload: Dictionary) -> void:
 		_in_recollection = false
 		_set_auto_mode(false)
 		_set_skip_mode(false)
+		audio_mgr.stop_voice()
 		stage.clear_all_bustshots()
 		if not vm.last_bg.is_empty():
 			stage.show_background(vm.last_bg)

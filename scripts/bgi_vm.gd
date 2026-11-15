@@ -325,6 +325,7 @@ func resume_from_click() -> void:
 func resume_with_choice(choice_index: int) -> void:
 	if wait_state == WaitState.CHOICE:
 		_mark_pending_line_read()
+		last_voice_entry = ""
 		_retval = choice_index
 		flags[0] = choice_index
 		wait_state = WaitState.NONE
@@ -737,6 +738,8 @@ func _handle_builtin_external(fn_name: String) -> void:
 			audio_command.emit(fn_name, args)
 		"_StopBGM", "_StopSE", "_StopStreamSE", "_StopVoice":
 			var args := _pop_all_frame_args(1)
+			if fn_name == "_StopVoice":
+				last_voice_entry = ""
 			audio_command.emit(fn_name, args)
 		"_Wait":
 			var args := _pop_all_frame_args(2)
@@ -806,6 +809,7 @@ func _handle_builtin_external(fn_name: String) -> void:
 			_data_stack.append(r)
 		"SoundStopAll":
 			_pop_all_frame_args(1)
+			last_voice_entry = ""
 			audio_command.emit("_StopBGM", [0])
 			audio_command.emit("_StopSE", [0])
 			audio_command.emit("_StopStreamSE", [0])

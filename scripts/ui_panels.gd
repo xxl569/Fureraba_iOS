@@ -715,13 +715,12 @@ func has_open_modal() -> bool:
 	)
 
 
-## 判断是否存在可通过 ESC 或返回键关闭的子弹窗（不含标题主覆盖层与剧情选项弹窗）
+## 判断是否存在可通过 ESC 或返回键关闭的子弹窗（不含标题主覆盖层、缺省资源引导弹窗与剧情选项弹窗）
 func has_closable_submodal() -> bool:
 	return (
 		sys_menu_panel.visible
 		or log_panel.visible
 		or gallery_panel.visible
-		or (byoa_panel != null and byoa_panel.visible)
 		or _confirm_overlay.visible
 		or (_name_input_overlay != null and _name_input_overlay.visible)
 		or (_prologue_skip_overlay != null and _prologue_skip_overlay.visible)
@@ -3156,6 +3155,7 @@ func _build_confirm_dialog() -> void:
 	_confirm_yes_btn.name = "BtnConfirmYes"
 	_confirm_yes_btn.position = Vector2(360, 384)
 	_confirm_yes_btn.custom_minimum_size = Vector2(214, 64)
+	_confirm_yes_btn.size = Vector2(214, 64)
 	_confirm_yes_btn.ignore_texture_size = true
 	_confirm_yes_btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
 	var yl := Label.new(); yl.text = "是"; yl.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -3174,6 +3174,7 @@ func _build_confirm_dialog() -> void:
 	_confirm_no_btn.name = "BtnConfirmNo"
 	_confirm_no_btn.position = Vector2(700, 384)
 	_confirm_no_btn.custom_minimum_size = Vector2(214, 64)
+	_confirm_no_btn.size = Vector2(214, 64)
 	_confirm_no_btn.ignore_texture_size = true
 	_confirm_no_btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
 	var nl := Label.new(); nl.text = "否"; nl.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -3424,6 +3425,8 @@ func _close_all_modals(include_choices: bool = false) -> void:
 	if include_choices:
 		choice_panel.visible = false
 	if gallery_panel != null:
+		if gallery_panel._viewer_overlay != null:
+			gallery_panel._viewer_overlay.visible = false
 		gallery_panel.visible = false
 	_confirm_overlay.visible = false
 	if _name_input_overlay != null:

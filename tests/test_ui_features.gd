@@ -693,14 +693,33 @@ func _init() -> void:
 		quit(85)
 		return
 
-	# 27. 回归验证：真实剧本人物语音解析、Ogg 加载、独立角色音量、Backlog 重听、_StopVoice
+	# 27. 回归验证：真实剧本人物语音解析、Ogg 加载、独立角色音量、Backlog 重听、_StopVoice、标题语音清理
 	main.cfg.reset_to_defaults()
+	# 27a) 验证标题语音在进入新游戏时被清理，且全部 12 角色试听与 4 条标题语音均可解码为 Ogg 流
+	for tv in ["TITLE_HI", "TITLE_MI", "TITLE_RI", "TITLE_YU"]:
+		if not main.audio_mgr.play_voice(tv) or not (main.audio_mgr.voice_player.stream is AudioStreamOggVorbis):
+			push_error("Failed to load title voice stream: " + tv)
+			quit(85)
+			return
+	for info in UiPanels.SOUND_CHAR_LIST:
+		var sample_entry: String = str(info["sample"])
+		if not main.audio_mgr.play_voice(sample_entry) or not (main.audio_mgr.voice_player.stream is AudioStreamOggVorbis):
+			push_error("Failed to load char sample stream: " + sample_entry)
+			quit(85)
+			return
+	main.audio_mgr.play_voice("TITLE_HI")
 	main.start_new_game()
+	if not main.audio_mgr.current_voice_entry.is_empty() or main.audio_mgr.voice_player.stream != null:
+		push_error("start_new_game did not clear title voice")
+		quit(85)
+		return
 	if not main.vm.start_script("b_days_0422"):
 		push_error("Failed to start b_days_0422")
 		quit(85)
 		return
 	var found_yu_voice := false
+	var yu_voice_entry := ""
+	var verified_silent_after_yu := false
 	for _step_i in range(600):
 		var ws: int = main.vm.step_until_wait(3000)
 		if ws == BgiVm.WaitState.CLICK:
@@ -717,7 +736,21 @@ func _init() -> void:
 					push_error("Voice stream not loaded for real script line: " + main.vm.last_voice_entry)
 					quit(87)
 					return
-				found_yu_voice = true
+				if str(main.vm.last_voice_entry).contains("#YU") and not found_yu_voice:
+					found_yu_voice = true
+					yu_voice_entry = str(main.vm.last_voice_entry)
+					var bl_top: Dictionary = main.ui._backlog[-1] if not main.ui._backlog.is_empty() else {}
+					if str(bl_top.get("voice_entry", "")) != yu_voice_entry:
+						push_error("Real Backlog did not record #YU voice_entry: " + str(bl_top.get("voice_entry", "")))
+						quit(87)
+						return
+			elif found_yu_voice:
+				var bl_silent: Dictionary = main.ui._backlog[-1] if not main.ui._backlog.is_empty() else {}
+				if not str(bl_silent.get("voice_entry", "")).is_empty():
+					push_error("Silent line after voiced line leaked voice_entry into Backlog: " + str(bl_silent.get("voice_entry", "")))
+					quit(87)
+					return
+				verified_silent_after_yu = true
 				break
 			main.vm.resume_from_click()
 		elif ws == BgiVm.WaitState.TIMER:
@@ -726,15 +759,14 @@ func _init() -> void:
 			main.vm.resume_with_choice(0)
 		else:
 			break
-	if not found_yu_voice:
-		push_error("Failed to hit a voiced line while stepping b_days_0422")
+	if not found_yu_voice or not verified_silent_after_yu:
+		push_error("Failed to hit #YU voiced line and subsequent silent line while stepping b_days_0422")
 		quit(88)
 		return
 
-	# 27b) 验证 Backlog 记录真实 voice_entry 且点击重听按钮可触发播放
-	var real_voice: String = str(main.vm.last_voice_entry)
+	# 27b) 验证 Backlog 记录真实 #YU voice_entry 且点击重听按钮可触发播放
+	var real_voice: String = yu_voice_entry
 	main.audio_mgr.stop_voice()
-	main.ui.set_dialogue("测试语音回放台词", "ゆずゆ", real_voice, {}, false, "")
 	main.ui._open_log_panel()
 	await process_frame
 	var replay_btn: TextureButton = null
@@ -768,9 +800,16 @@ func _init() -> void:
 		quit(91)
 		return
 	main.audio_mgr.handle_audio_command("_StopVoice", [0])
-	if main.audio_mgr.voice_player.stream != null:
-		push_error("_StopVoice command did not clear voice_player.stream")
+	if main.audio_mgr.voice_player.stream != null or not main.audio_mgr.current_voice_entry.is_empty():
+		push_error("_StopVoice command did not clear voice_player.stream or current_voice_entry")
 		quit(92)
+		return
+	main.ui.byoa_panel.visible = true
+	var byoa_closable: bool = main.ui.has_closable_submodal()
+	main.ui.byoa_panel.visible = false
+	if byoa_closable:
+		push_error("byoa_panel should not be reported as ESC-closable submodal")
+		quit(93)
 		return
 
 	main.cfg.reset_to_defaults()

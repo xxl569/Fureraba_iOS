@@ -106,6 +106,8 @@ func stop_bgm() -> void:
 func stop_voice() -> void:
 	voice_player.stop()
 	voice_player.stream = null
+	current_voice_entry = ""
+	current_voice_script_vol = 1.0
 
 
 func play_se(entry_name: String) -> bool:
