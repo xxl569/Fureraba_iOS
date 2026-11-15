@@ -7,6 +7,7 @@ extends Control
 
 const MAX_LAYERS := 256
 const LOGICAL_SIZE := Vector2(1280.0, 720.0)
+const BGI_UNCHANGED := 268435456
 
 var _vfs: BgiVfs
 var _bp_vm: BgiBpVm
@@ -15,6 +16,8 @@ var _cache: BgiCache
 var _layers_root: Control
 var _layer_nodes: Dictionary = {} # layer_id (int) -> Control
 var _layer_asset_names: Dictionary = {} # layer_id (int) -> String
+var _layer_face_names: Dictionary = {} # layer_id (int) -> String
+var _layer_bgi_pos: Dictionary = {} # layer_id (int) -> Vector2
 var _quake_tween: Tween = null
 
 
@@ -96,17 +99,46 @@ func show_background(img_name: String) -> bool:
 	return true
 
 
-func show_bustshot(layer_id: int, img_name: String, pos_x: float = 0.0, pos_y: float = 0.0) -> bool:
+func show_bustshot(layer_id: int, img_name: String, pos_x: float = 0.0, pos_y: float = 0.0, face_name: String = "") -> bool:
 	var lid := clampi(layer_id, 1, MAX_LAYERS - 1)
-	var tex := get_texture_cached(img_name)
+	var body_name := img_name
+	if body_name.is_empty():
+		body_name = str(_layer_asset_names.get(lid, ""))
+	var tex := get_texture_cached(body_name)
 	if tex == null:
 		return false
 	var node := _ensure_texture_layer(lid, lid)
+	node.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	node.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	node.stretch_mode = TextureRect.STRETCH_SCALE
 	node.texture = tex
-	node.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	node.position = Vector2(pos_x, pos_y)
+	var tex_sz := tex.get_size()
+	node.size = tex_sz
+	node.position = Vector2((LOGICAL_SIZE.x - tex_sz.x) * 0.5 + pos_x, pos_y)
+	node.modulate.a = 1.0
 	node.visible = true
-	_layer_asset_names[lid] = img_name
+	_layer_asset_names[lid] = body_name
+	_layer_face_names[lid] = face_name
+
+	var face_node := node.get_node_or_null("FaceOverlay") as TextureRect
+	if not face_name.is_empty():
+		var face_tex := get_texture_cached(face_name)
+		if face_tex != null:
+			if face_node == null:
+				face_node = TextureRect.new()
+				face_node.name = "FaceOverlay"
+				face_node.set_anchors_preset(Control.PRESET_FULL_RECT)
+				face_node.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+				face_node.stretch_mode = TextureRect.STRETCH_SCALE
+				face_node.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				node.add_child(face_node)
+			face_node.texture = face_tex
+			face_node.visible = true
+		elif face_node != null:
+			face_node.visible = false
+	elif face_node != null:
+		face_node.visible = false
+
 	return true
 
 
@@ -140,6 +172,8 @@ func show_scroll_image(layer_id: int, img_name: String) -> int:
 func clear_layer(layer_id: int) -> void:
 	_remove_layer(layer_id)
 	_layer_asset_names.erase(layer_id)
+	_layer_face_names.erase(layer_id)
+	_layer_bgi_pos.erase(layer_id)
 
 
 func clear_all_bustshots() -> void:
@@ -156,7 +190,10 @@ func refresh_nude_layers() -> void:
 		else:
 			var ctrl: Control = _layer_nodes.get(lid)
 			if ctrl is TextureRect:
-				show_bustshot(int(lid), asset_name, ctrl.position.x, ctrl.position.y)
+				var tex_sz := (ctrl as TextureRect).size
+				var offset_x := ctrl.position.x - (LOGICAL_SIZE.x - tex_sz.x) * 0.5
+				var face_name := str(_layer_face_names.get(lid, ""))
+				show_bustshot(int(lid), asset_name, offset_x, ctrl.position.y, face_name)
 
 
 func trigger_quake(amplitude: float = 12.0, duration: float = 0.35) -> void:
@@ -182,11 +219,48 @@ func handle_stage_command(cmd: String, args: Array) -> void:
 		"_FadeScene":
 			clear_all_bustshots()
 			show_background("black")
-		"_DrawBS", "_FadeBS":
+		"_DrawBS":
 			if args.size() >= 2:
-				var lid := int(args[0]) if typeof(args[0]) == TYPE_INT else 10
-				var bname := str(args[1]) if typeof(args[1]) == TYPE_STRING else str(args[0])
-				show_bustshot(maxi(lid, 1), bname)
+				var lid := maxi(int(args[0]), 1)
+				var bname := str(args[1]) if typeof(args[1]) == TYPE_STRING else ""
+				var fname := str(args[2]) if args.size() >= 3 and typeof(args[2]) == TYPE_STRING else ""
+				var prev_bgi: Vector2 = _layer_bgi_pos.get(lid, Vector2(250.0, 0.0))
+				var raw_x := int(args[6]) if args.size() >= 7 else BGI_UNCHANGED
+				var raw_y := int(args[7]) if args.size() >= 8 else BGI_UNCHANGED
+				var bgi_x := float(raw_x) if raw_x != BGI_UNCHANGED else prev_bgi.x
+				var bgi_y := float(raw_y) if raw_y != BGI_UNCHANGED else prev_bgi.y
+				_layer_bgi_pos[lid] = Vector2(bgi_x, bgi_y)
+				var offset_x := (bgi_x - 250.0) * (LOGICAL_SIZE.x / 500.0)
+				var offset_y := bgi_y * (LOGICAL_SIZE.y / 375.0)
+				if show_bustshot(lid, bname, offset_x, offset_y, fname):
+					if args.size() >= 12:
+						var alpha := int(args[11])
+						if alpha <= 0:
+							clear_layer(lid)
+						elif _layer_nodes.has(lid):
+							_layer_nodes[lid].modulate.a = clampf(float(alpha) / 100.0, 0.0, 1.0)
+		"_FadeBS":
+			if args.size() >= 2:
+				var lid := maxi(int(args[0]), 1)
+				var alpha := int(args[1])
+				if alpha <= 0:
+					clear_layer(lid)
+				elif _layer_nodes.has(lid):
+					_layer_nodes[lid].modulate.a = clampf(float(alpha) / 100.0, 0.0, 1.0)
+		"_MoveBS":
+			if args.size() >= 6:
+				var lid := maxi(int(args[0]), 1)
+				var prev_bgi: Vector2 = _layer_bgi_pos.get(lid, Vector2(250.0, 0.0))
+				var raw_x := int(args[4])
+				var raw_y := int(args[5])
+				var bgi_x := float(raw_x) if raw_x != BGI_UNCHANGED else prev_bgi.x
+				var bgi_y := float(raw_y) if raw_y != BGI_UNCHANGED else prev_bgi.y
+				_layer_bgi_pos[lid] = Vector2(bgi_x, bgi_y)
+				if _layer_nodes.has(lid) and _layer_nodes[lid] is TextureRect:
+					var tr := _layer_nodes[lid] as TextureRect
+					var offset_x := (bgi_x - 250.0) * (LOGICAL_SIZE.x / 500.0)
+					var offset_y := bgi_y * (LOGICAL_SIZE.y / 375.0)
+					tr.position = Vector2((LOGICAL_SIZE.x - tr.size.x) * 0.5 + offset_x, offset_y)
 		"_ClearBS":
 			clear_all_bustshots()
 		"_DrawSPR":

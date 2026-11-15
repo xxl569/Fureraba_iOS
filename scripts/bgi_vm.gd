@@ -469,32 +469,95 @@ func _handle_scope_mark(cmd_id: int, args: Array) -> void:
 
 func _is_intercepted_external(fn_name: String) -> bool:
 	return fn_name in [
-		"_DrawScene", "_FadeScene", "_DrawBS", "_FadeBS", "_MoveBS", "_ClearBS",
-		"_DrawSPR", "_QuakeEx", "StartShakingOfWindowSx", "_ScrollBG",
-		"_PlayBGM", "_FadeBGM", "_PlaySE", "_FadeSE", "_PlayStreamSE", "_FadeStreamSE",
-		"_PlayVoice", "_WaitToFinishSE", "_Wait",
+		"_DrawScene", "_DrawSceneByVirtualBG", "_FadeScene",
+		"_DrawBS", "_FadeBS", "_MoveBS", "_ShiftBS", "_OrderBS", "_ClearBS",
+		"_DrawFace", "_FadeFace",
+		"_DrawSPR", "_FadeSPR", "_MoveSPR",
+		"_Quake", "_QuakeEx", "StartShakingOfWindowSx", "_ScrollBG",
+		"_PlayBGM", "_FadeBGM", "_StopBGM",
+		"_PlaySE", "_FadeSE", "_StopSE",
+		"_PlayStreamSE", "_FadeStreamSE", "_StopStreamSE",
+		"_PlayVoice", "_StopVoice", "_WaitToFinishSE", "_Wait",
 		"SelectTalk", "SelectTopic", "SelectMail",
 	]
 
 
 func _handle_builtin_external(fn_name: String) -> void:
 	match fn_name:
-		"_DrawScene":
-			# 参数栈: [bg_name, x, y, ..., time, ...]
+		"_DrawScene", "_DrawSceneByVirtualBG":
+			# 参数栈(9): [bg_name, ...]
 			var args := _pop_all_frame_args(9)
 			if args.size() >= 1:
 				last_bg = str(args[0])
 			stage_command.emit("_DrawScene", args)
-		"_FadeScene", "_DrawBS", "_FadeBS", "_MoveBS", "_ClearBS", "_DrawSPR", "_QuakeEx", "StartShakingOfWindowSx", "_ScrollBG", "SetBustshotTime":
-			var args := _pop_all_frame_args(8)
+		"_FadeScene":
+			# 参数栈(3): [kind, mode, time_ms]
+			var args := _pop_all_frame_args(3)
+			stage_command.emit(fn_name, args)
+		"_DrawBS":
+			# 参数栈(21): [layer_id, body_img, face_img, ..., x(6), y(7), ..., alpha(11), ..., time(18), ...]
+			var args := _pop_all_frame_args(21)
+			stage_command.emit(fn_name, args)
+		"_FadeBS":
+			# 参数栈(9): [layer_id, alpha, ...]
+			var args := _pop_all_frame_args(9)
+			stage_command.emit(fn_name, args)
+		"_MoveBS":
+			# 参数栈(12): [layer_id, ..., x(4), y(5), ...]
+			var args := _pop_all_frame_args(12)
+			stage_command.emit(fn_name, args)
+		"_ShiftBS", "_MoveSPR":
+			var args := _pop_all_frame_args(10)
+			stage_command.emit(fn_name, args)
+		"_OrderBS", "_Quake":
+			var args := _pop_all_frame_args(3)
+			stage_command.emit(fn_name, args)
+		"_DrawFace":
+			var args := _pop_all_frame_args(3)
+			stage_command.emit(fn_name, args)
+		"_FadeFace":
+			var args := _pop_all_frame_args(2)
+			stage_command.emit(fn_name, args)
+		"_DrawSPR":
+			var args := _pop_all_frame_args(19)
+			stage_command.emit(fn_name, args)
+		"_FadeSPR":
+			var args := _pop_all_frame_args(9)
+			stage_command.emit(fn_name, args)
+		"_ClearBS":
+			var args := _pop_all_frame_args(1)
+			stage_command.emit(fn_name, args)
+		"_QuakeEx":
+			var args := _pop_all_frame_args(6)
+			stage_command.emit(fn_name, args)
+		"StartShakingOfWindowSx":
+			var args := _pop_all_frame_args(4)
+			stage_command.emit(fn_name, args)
+		"_ScrollBG":
+			var args := _pop_all_frame_args(7)
 			stage_command.emit(fn_name, args)
 		"_PlayBGM":
 			var args := _pop_all_frame_args(6)
 			if args.size() >= 2:
 				last_bgm = str(args[1])
 			audio_command.emit("_PlayBGM", args)
-		"_FadeBGM", "_PlaySE", "_FadeSE", "_PlayStreamSE", "_FadeStreamSE", "_PlayVoice", "_WaitToFinishSE":
+		"_FadeBGM", "_FadeStreamSE":
+			var args := _pop_all_frame_args(3)
+			audio_command.emit(fn_name, args)
+		"_PlaySE":
 			var args := _pop_all_frame_args(6)
+			audio_command.emit(fn_name, args)
+		"_PlayStreamSE":
+			var args := _pop_all_frame_args(7)
+			audio_command.emit(fn_name, args)
+		"_PlayVoice":
+			var args := _pop_all_frame_args(4)
+			audio_command.emit(fn_name, args)
+		"_FadeSE", "_WaitToFinishSE":
+			var args := _pop_all_frame_args(2)
+			audio_command.emit(fn_name, args)
+		"_StopBGM", "_StopSE", "_StopStreamSE", "_StopVoice":
+			var args := _pop_all_frame_args(1)
 			audio_command.emit(fn_name, args)
 		"_Wait":
 			var args := _pop_all_frame_args(2)
