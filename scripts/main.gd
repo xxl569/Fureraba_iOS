@@ -24,6 +24,7 @@ var _in_game: bool = false
 var _in_recollection: bool = false
 var _cursor_idle_accum: float = 0.0
 var _app_paused_by_focus: bool = false
+var _last_bgm_telop_mode: int = -1
 
 
 func _ready() -> void:
@@ -199,7 +200,12 @@ func _execute_shortcut_action(act: String) -> void:
 		"keys_menu":
 			ui.open_system_menu("keys", true)
 		"scene_jump":
-			if not ui._backlog.is_empty():
+			if ui._backlog.size() >= 2:
+				var prev_item: Dictionary = ui._backlog[ui._backlog.size() - 2]
+				var snap: Dictionary = prev_item.get("snapshot", {})
+				if not snap.is_empty():
+					ui.show_confirm("sgdialog990008", "确定快速跳跃？", func() -> void: _on_quick_jump(snap))
+			elif not ui._backlog.is_empty():
 				var last_item: Dictionary = ui._backlog[ui._backlog.size() - 1]
 				var snap: Dictionary = last_item.get("snapshot", {})
 				if not snap.is_empty():
@@ -250,12 +256,9 @@ func _process(delta: float) -> void:
 		return
 
 	# 回想剧本播放完毕后自动返回 CG 鉴赏界面
-	if _in_recollection and vm.wait_state == BgiVm.WaitState.NONE:
-		var sc_data := vm.load_script(vm.current_script)
-		var insns: Array = sc_data.get("insns", [])
-		if vm.call_stack.is_empty() and vm.pc >= insns.size():
-			_end_recollection_to_gallery()
-			return
+	if _in_recollection and vm.wait_state == BgiVm.WaitState.ENDED:
+		_end_recollection_to_gallery()
+		return
 
 	if vm.wait_state == BgiVm.WaitState.TIMER:
 		vm.wait_timer_sec -= delta
@@ -283,10 +286,8 @@ func _process(delta: float) -> void:
 
 func _connect_signals() -> void:
 	vm.dialogue_printed.connect(func(text: String, speaker: String, _w: bool) -> void:
-		var snap := {}
-		if DisplayServer.get_name() != "headless":
-			snap = vm.export_save_state()
-			snap["bustshots"] = stage.export_bustshots_state()
+		var snap := vm.export_save_state()
+		snap["bustshots"] = stage.export_bustshots_state()
 		var is_read := bp_vm.is_line_read(vm.current_script, vm.current_line)
 		ui.set_dialogue(text, speaker, vm.last_voice_entry, snap, is_read, vm.last_face_img)
 	)
@@ -368,8 +369,12 @@ func _try_mount_and_init() -> void:
 		stage.screen_effect_mode = cfg.screen_effect_mode
 		audio_mgr.setup(vfs, cfg)
 		bp_vm.load_gdb_from_vfs("BGI.gdb")
+		bp_vm.load_global_read_state()
 		bp_vm.set_nude_mode(cfg.nude_mode)
 		ui.setup(cfg, vfs.loaded_font, vfs)
+		if ui.gallery_panel != null:
+			ui.gallery_panel.set_bp_vm(bp_vm)
+		_last_bgm_telop_mode = cfg.bgm_telop_mode
 		ui.update_nude_indicator(cfg.nude_mode)
 		vm.player_family_name = cfg.player_family_name
 		vm.player_given_name = cfg.player_given_name
@@ -392,6 +397,8 @@ func _show_title_screen() -> void:
 
 
 func _return_to_title() -> void:
+	if bp_vm != null:
+		bp_vm.save_global_read_state()
 	_in_game = false
 	_in_recollection = false
 	_set_auto_mode(false)
@@ -400,6 +407,11 @@ func _return_to_title() -> void:
 	audio_mgr.stop_voice()
 	audio_mgr.stop_bgm()
 	_show_title_screen()
+
+
+func _exit_tree() -> void:
+	if bp_vm != null:
+		bp_vm.save_global_read_state()
 
 
 func _start_recollection(script_name: String, appearance_mode: int) -> void:
@@ -449,6 +461,7 @@ func _on_new_game_confirmed(skip_prologue: bool, family_name: String, given_name
 	_in_recollection = false
 	_set_auto_mode(false)
 	_set_skip_mode(false)
+	stage.clear_all_bustshots()
 	var entry := "b_days_0422" if (skip_prologue and vfs.has_entry("b_days_0422")) else "a_prologue01"
 	vm.start_script(entry, 0, true)
 	vm.step_until_wait()
@@ -464,6 +477,7 @@ func start_new_game() -> void:
 	_in_recollection = false
 	_set_auto_mode(false)
 	_set_skip_mode(false)
+	stage.clear_all_bustshots()
 	vm.start_script("a_prologue01", 0, true)
 	vm.step_until_wait()
 
@@ -495,14 +509,12 @@ func _on_user_advance() -> void:
 func _advance_dialogue() -> void:
 	if not _in_game or vm == null:
 		return
-	if vm.wait_state == BgiVm.WaitState.CLICK:
+	if vm.wait_state == BgiVm.WaitState.CLICK or vm.wait_state == BgiVm.WaitState.TIMER:
+		vm.wait_timer_sec = 0.0
 		vm.resume_from_click()
 		vm.step_until_wait()
-		if _in_recollection and vm.wait_state == BgiVm.WaitState.NONE:
-			var sc_data := vm.load_script(vm.current_script)
-			var insns: Array = sc_data.get("insns", [])
-			if vm.call_stack.is_empty() and vm.pc >= insns.size():
-				_end_recollection_to_gallery()
+		if _in_recollection and vm.wait_state == BgiVm.WaitState.ENDED:
+			_end_recollection_to_gallery()
 
 
 func _set_auto_mode(on: bool) -> void:
@@ -539,6 +551,10 @@ func _on_config_changed() -> void:
 		bp_vm.set_nude_mode(cfg.nude_mode)
 		ui.update_nude_indicator(cfg.nude_mode)
 		stage.refresh_nude_layers()
+	if _last_bgm_telop_mode != cfg.bgm_telop_mode:
+		_last_bgm_telop_mode = cfg.bgm_telop_mode
+		if not audio_mgr.current_bgm.is_empty():
+			ui.show_bgm_telop(audio_mgr.current_bgm)
 
 
 func _apply_aspect_mode() -> void:
@@ -569,6 +585,8 @@ func _replay_voice(voice_entry: String) -> void:
 func _on_save_slot(slot: int) -> void:
 	if not _in_game or _in_recollection:
 		return
+	if bp_vm != null:
+		bp_vm.save_global_read_state()
 	var payload := vm.export_save_state()
 	payload["read_state"] = bp_vm.export_read_state()
 	payload["bustshots"] = stage.export_bustshots_state()

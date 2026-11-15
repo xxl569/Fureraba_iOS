@@ -168,6 +168,7 @@ const GALLERY_RECOLL_SLOTS: Dictionary = {
 
 var _theme = null
 var _vfs: BgiVfs
+var _bp_vm: BgiBpVm = null
 var _font: Font = null
 
 var _bg_rect: TextureRect
@@ -212,6 +213,10 @@ func setup(theme_loader, vfs: BgiVfs, font: Font = null) -> void:
 				var strip := bg_img.get_region(Rect2i(420, 14, 16, 66))
 				mask_tr.texture = ImageTexture.create_from_image(strip)
 	_update_bgm_telop(_current_bgm_idx)
+
+
+func set_bp_vm(bp_vm: BgiBpVm) -> void:
+	_bp_vm = bp_vm
 
 
 func select_char(idx: int) -> void:
@@ -564,16 +569,37 @@ func _get_thumb_tex(thumb_name: String) -> ImageTexture:
 	return (frames[0] as ImageTexture) if not frames.is_empty() else null
 
 
+func _input(event: InputEvent) -> void:
+	if not visible:
+		return
+	if event is InputEventKey and event.pressed and not event.echo:
+		if _viewer_overlay != null and _viewer_overlay.visible:
+			if event.keycode == KEY_ESCAPE:
+				_viewer_overlay.visible = false
+				get_viewport().set_input_as_handled()
+			elif event.keycode in [KEY_LEFT, KEY_UP]:
+				if _viewer_idx > 0:
+					_open_cg_viewer(_viewer_idx - 1)
+				get_viewport().set_input_as_handled()
+			elif event.keycode in [KEY_RIGHT, KEY_DOWN, KEY_SPACE, KEY_ENTER, KEY_KP_ENTER]:
+				if _current_cg_list.is_empty() or _viewer_idx + 1 >= _current_cg_list.size():
+					_viewer_overlay.visible = false
+				else:
+					_open_cg_viewer(_viewer_idx + 1)
+				get_viewport().set_input_as_handled()
+
+
 func _open_cg_viewer(idx: int) -> void:
 	if idx < 0 or idx >= _current_cg_list.size() or _vfs == null:
 		return
 	_viewer_idx = idx
-	var cg_name := str(_current_cg_list[idx])
+	var raw_name := str(_current_cg_list[idx])
+	var cg_name := _bp_vm.resolve_nude_image_name(raw_name) if _bp_vm != null else raw_name
 	var img := _vfs.decode_image(cg_name)
 	if img != null:
 		_viewer_tex.texture = ImageTexture.create_from_image(img)
 	var mode_str := "变更外观" if _appearance_mode == 1 else "默认外观"
-	_viewer_info.text = "%s (%s) [%d / %d]  （左键下一张 / 右键关闭）" % [cg_name, mode_str, idx + 1, _current_cg_list.size()]
+	_viewer_info.text = "%s (%s) [%d / %d]  （左键/→下一张  ←上一张  右键/Esc关闭）" % [cg_name, mode_str, idx + 1, _current_cg_list.size()]
 	_viewer_overlay.visible = true
 
 

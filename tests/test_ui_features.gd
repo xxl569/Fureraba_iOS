@@ -267,12 +267,15 @@ func _init() -> void:
 		quit(30)
 		return
 	var first_thumb := gp._cg_grid.get_child(0) as TextureButton
-	if first_thumb != null and first_thumb.texture_normal is AtlasTexture:
-		var at := first_thumb.texture_normal as AtlasTexture
-		if at.region.size.x > 200:
-			push_error("Gallery 3-state thumbnail was not sliced to 160x90: " + str(at.region.size))
-			quit(31)
-			return
+	if first_thumb == null or first_thumb.texture_normal == null:
+		push_error("Gallery first thumbnail missing texture_normal")
+		quit(31)
+		return
+	var t_sz := first_thumb.texture_normal.get_size()
+	if t_sz.x > 200 or t_sz.x <= 0:
+		push_error("Gallery 3-state thumbnail was not sliced to 160x90: " + str(t_sz))
+		quit(31)
+		return
 	gp.visible = false
 
 	# 15. 验证画面设置 1280x720 置灰宽屏选项 & 文本设置交互式字体下拉菜单
@@ -323,6 +326,139 @@ func _init() -> void:
 	if main.ui._msg_bg_rect.mouse_filter != Control.MOUSE_FILTER_PASS:
 		push_error("_msg_bg_rect mouse_filter should be PASS so right-click/wheel reaches main")
 		quit(39)
+		return
+
+	# 18. 验证 b_days_0422 推进至广场人物立绘出现且零未知指令/外部函数
+	main.vm.unknown_opcodes.clear()
+	main.vm.unknown_externals.clear()
+	main._on_new_game_confirmed(true, "青葉", "恭介")
+	var got_plaza_bs := false
+	for _step_i in range(60):
+		if not main.stage.export_bustshots_state().is_empty() and not main.vm.last_dialogue_text.is_empty():
+			got_plaza_bs = true
+			break
+		main._advance_dialogue()
+	if not got_plaza_bs:
+		push_error("b_days_0422 failed to reach bustshot + dialogue within 60 advances")
+		quit(40)
+		return
+	if not main.vm.unknown_opcodes.is_empty() or not main.vm.unknown_externals.is_empty():
+		push_error("b_days_0422 reported unknown opcodes/externals: op=%s ext=%s" % [str(main.vm.unknown_opcodes), str(main.vm.unknown_externals)])
+		quit(41)
+		return
+
+	# 19. 验证 0x140 未读->推进后已读，以及全局已读持久化
+	var test_sc := "__ut_read_probe"
+	var test_ln := 123
+	main.bp_vm._read_bits.erase(test_sc)
+	main.vm.current_script = test_sc
+	main.vm.current_line = test_ln
+	main.vm._pending_read_script = test_sc
+	main.vm._pending_read_line = test_ln
+	main.vm.wait_state = BgiVm.WaitState.CLICK
+	if main.bp_vm.is_line_read(test_sc, test_ln):
+		push_error("Line should remain unread while currently displayed")
+		quit(42)
+		return
+	main.vm.resume_from_click()
+	if not main.bp_vm.is_line_read(test_sc, test_ln):
+		push_error("Line should become read after resume_from_click()")
+		quit(43)
+		return
+	main.bp_vm.save_global_read_state()
+	var bp2 := BgiBpVm.new(main.vfs)
+	bp2.load_global_read_state()
+	if not bp2.is_line_read(test_sc, test_ln):
+		push_error("Global read_state.json persistence failed across BgiBpVm instances")
+		quit(44)
+		return
+	main.bp_vm._read_bits.erase(test_sc)
+	main.bp_vm._read_dirty = true
+	main.bp_vm.save_global_read_state()
+
+	# 20. 验证快捷键冲突时恢复原键文字并保留冲突警告
+	main.cfg.reset_to_defaults()
+	main.ui.open_system_menu("keys", true)
+	var btn_klog := main.ui._sys_content_root.get_node_or_null("BtnKey_log") as Button
+	if btn_klog == null:
+		push_error("Missing BtnKey_log")
+		quit(45)
+		return
+	btn_klog.emit_signal("pressed")
+	var conflict_ev := InputEventKey.new()
+	conflict_ev.pressed = true
+	conflict_ev.keycode = KEY_R # 默认已分配给 voice_replay
+	main.ui._input(conflict_ev)
+	if not main.ui._waiting_key_action.is_empty():
+		push_error("Key conflict should clear _waiting_key_action")
+		quit(46)
+		return
+	var btn_klog_after := main.ui._sys_content_root.get_node_or_null("BtnKey_log") as Button
+	var notice_after := main.ui._sys_content_root.get_node_or_null("KeyNoticeLabel") as Label
+	if btn_klog_after == null or btn_klog_after.text == "请按键..." or notice_after == null or not notice_after.text.contains("占用"):
+		push_error("Key conflict UI did not reset button text or show conflict notice")
+		quit(47)
+		return
+
+	# 21. 验证调色板真实像素取色与双色文本预览
+	main.ui.open_system_menu("text", true)
+	var pal := main.ui._sys_content_root.get_node_or_null("ColorPalettePicker") as Control
+	if pal == null:
+		push_error("Missing ColorPalettePicker")
+		quit(48)
+		return
+	var before_col: Color = main.cfg.text_color
+	var pal_ev := InputEventMouseButton.new()
+	pal_ev.button_index = MOUSE_BUTTON_LEFT
+	pal_ev.pressed = true
+	pal_ev.position = Vector2(360, 80)
+	pal.emit_signal("gui_input", pal_ev)
+	if main.cfg.text_color.is_equal_approx(before_col):
+		push_error("ColorPalettePicker click did not change text_color")
+		quit(49)
+		return
+
+	# 22. 验证 _DrawScene 清除旧立绘，以及 _Flash / _EnlargeBG 不报错
+	main.stage.handle_stage_command("_DrawBS", [5, "YU01PH_N", 640, 0, 255])
+	if main.stage.export_bustshots_state().is_empty():
+		push_error("_DrawBS failed to place bustshot")
+		quit(50)
+		return
+	main.stage.handle_stage_command("_DrawScene", ["fl_bg_05a"])
+	if not main.stage.export_bustshots_state().is_empty():
+		push_error("_DrawScene should clear existing bustshots")
+		quit(51)
+		return
+	main.stage.handle_stage_command("_EnlargeBG", ["fl_bg_05a", 120, 640, 360])
+	main.stage.handle_stage_command("_Flash", [255, 255, 255, 100])
+
+	# 23. 验证 存档备注获焦时不因 hover 切换槽位，以及 附录 CG 查看器键控
+	main.ui.open_system_menu("save", true)
+	main.ui._selected_slot = 0
+	if main.ui._save_comment_edit != null:
+		main.ui._save_comment_edit.grab_focus()
+		var slot1 := main.ui._sys_content_root.get_node_or_null("BtnSlot_1") as Button
+		if slot1 != null:
+			slot1.emit_signal("mouse_entered")
+			if main.ui._selected_slot != 0:
+				push_error("Hovering slot 1 stole _selected_slot while SaveCommentEdit had focus")
+				quit(52)
+				return
+	main.ui._close_all_modals()
+	gp.open_gallery(true)
+	gp._current_cg_list = ["ev_01_01"]
+	gp._open_cg_viewer(0)
+	if gp._viewer_overlay == null or not gp._viewer_overlay.visible:
+		push_error("Gallery CG viewer failed to open")
+		quit(53)
+		return
+	var esc_ev := InputEventKey.new()
+	esc_ev.pressed = true
+	esc_ev.keycode = KEY_ESCAPE
+	gp._input(esc_ev)
+	if gp._viewer_overlay.visible:
+		push_error("Gallery CG viewer did not close on ESC")
+		quit(54)
 		return
 
 	main.cfg.reset_to_defaults()

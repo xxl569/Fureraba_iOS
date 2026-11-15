@@ -54,6 +54,9 @@ var last_face_img: String = ""
 var current_line: int = 0
 var current_src_file: String = ""
 var flags: Dictionary = {}
+var _sys_work: Dictionary = {}
+var _pending_read_script: String = ""
+var _pending_read_line: int = -1
 var caption: String = "フレラバ 〜Friend to Lover〜"
 var player_family_name: String = "青葉"
 var player_given_name: String = "恭介"
@@ -248,9 +251,14 @@ func start_script(name: String, entry_offset: int = 0, reset_state: bool = true)
 		_mem.clear()
 		_call_stack.clear()
 		_exc_stack.clear()
+		_sys_work.clear()
+		_pending_read_script = ""
+		_pending_read_line = -1
 		_sp = 0x10000
 		wait_state = WaitState.NONE
 		wait_timer_sec = 0.0
+	elif _bp_vm != null:
+		_bp_vm.save_global_read_state()
 	current_script = name
 	_insns = sc["insns"]
 	_offset_to_idx = sc["offset_to_idx"]
@@ -260,9 +268,17 @@ func start_script(name: String, entry_offset: int = 0, reset_state: bool = true)
 	return true
 
 
+func _mark_pending_line_read() -> void:
+	if _bp_vm != null and not _pending_read_script.is_empty() and _pending_read_line >= 0:
+		_bp_vm.mark_line_read(_pending_read_script, _pending_read_line)
+	_pending_read_script = ""
+	_pending_read_line = -1
+
+
 func resume_from_click() -> void:
 	if wait_state == WaitState.CLICK or wait_state == WaitState.TIMER:
 		if wait_state == WaitState.CLICK:
+			_mark_pending_line_read()
 			last_voice_entry = ""
 		wait_state = WaitState.NONE
 		wait_timer_sec = 0.0
@@ -270,8 +286,9 @@ func resume_from_click() -> void:
 
 func resume_with_choice(choice_index: int) -> void:
 	if wait_state == WaitState.CHOICE:
+		_mark_pending_line_read()
 		_retval = choice_index
-		_data_stack.append(choice_index)
+		flags[0] = choice_index
 		wait_state = WaitState.NONE
 
 
@@ -401,11 +418,15 @@ func _exec_one() -> void:
 		0x28: # SHL
 			var b := _pop_int()
 			var a := _pop_int()
-			_data_stack.append(a << b)
-		0x29: # SHR
+			_data_stack.append(_to_i32(a << clampi(b, 0, 31)))
+		0x29: # BGI SHL (<<)
 			var b := _pop_int()
 			var a := _pop_int()
-			_data_stack.append(a >> b)
+			_data_stack.append(_to_i32(a << clampi(b, 0, 31)))
+		0x2B: # BGI SAR (>>)
+			var b := _pop_int()
+			var a := _to_i32(_pop_int())
+			_data_stack.append(a >> clampi(b, 0, 31))
 		0x30: # CMP_EQ
 			var b = _pop_any()
 			var a = _pop_any()
@@ -483,7 +504,35 @@ func _exec_one() -> void:
 			_data_stack.append(1)
 		0x0F9: # ERROR_DIALOG
 			var _msg := str(_pop_any())
+		0x91: # STRCAT(sa, sb, dst_ptr)
+			var dst := _pop_int()
+			var sb := str(_pop_any())
+			var sa := str(_pop_any())
+			_mem[dst] = sa + sb
+		0x98: # ITOA(mode, val, dst_ptr)
+			var dst := _pop_int()
+			var val := _pop_int()
+			var _mode := _pop_int()
+			_mem[dst] = str(val)
+		0xE0: # SYS_WORK_SET(val, fid)
+			var fid := _pop_int()
+			var fval := _pop_int()
+			_sys_work[fid] = fval
+		0xE1: # SYS_WORK_GET(fid)
+			var fid := _pop_int()
+			_data_stack.append(int(_sys_work.get(fid, 0)))
+		0xEB: # SET_LOCAL_SHORT_STRINGS
+			_pop_n(2)
+		0x128: # SYS_EFFECT_ENABLED
+			_data_stack.append(1)
+		0x14D: # SYS_SET_FONT(arg0..3)
+			_pop_n(4)
+		0x160: # SYS_SELECT_CORE(cnt, ptr)
+			var _ptr := _pop_int()
+			var _cnt := _pop_int()
+			_data_stack.append(0)
 		0x140: # SYS_TEXT_PRINT
+			_mark_pending_line_read()
 			var text := normalize_dialogue_text(str(_pop_any()))
 			var speaker_arg = _pop_any()
 			var _voice_arg = _pop_any()
@@ -494,11 +543,13 @@ func _exec_one() -> void:
 				speaker = normalize_speaker(str(speaker_arg))
 			last_dialogue_text = text
 			last_speaker = speaker
-			if _bp_vm != null:
-				_bp_vm.mark_line_read(current_script, current_line)
+			_pending_read_script = current_script
+			_pending_read_line = current_line
 			dialogue_printed.emit(text, speaker, wait_flag != 0)
 			if wait_flag != 0:
 				wait_state = WaitState.CLICK
+			else:
+				_mark_pending_line_read()
 		0x142: # SYS_TEXT_CLEAR_OR_WAIT
 			text_cleared.emit()
 		_:
@@ -521,13 +572,16 @@ func _handle_scope_mark(cmd_id: int, args: Array) -> void:
 		music_telop[str(args[1])] = int(args[0])
 	elif cmd_id == 319 and args.size() >= 1:
 		caption = str(args[0])
+	elif cmd_id == 254 and args.size() >= 2:
+		current_src_file = str(args[0])
+		current_line = int(args[1])
 
 
 func _is_intercepted_external(fn_name: String) -> bool:
 	return fn_name in [
 		"_DrawScene", "_DrawSceneByVirtualBG", "_FadeScene", "_DrawBG", "_EnlargeBG",
 		"_DrawFilm", "_DrawFilmSx", "_FadeFilm", "_Flash",
-		"_DrawBS", "_FadeBS", "_MoveBS", "_ShiftBS", "_OrderBS", "_ClearBS",
+		"_DrawBS", "_FadeBS", "_MoveBS", "_ShiftBS", "_OrderBS", "_ClearBS", "clear_bs",
 		"_DrawFace", "_FadeFace",
 		"_DrawSPR", "_FadeSPR", "_MoveSPR",
 		"_Quake", "_QuakeEx", "StartShakingOfWindowSx", "_ScrollBG",
@@ -536,6 +590,7 @@ func _is_intercepted_external(fn_name: String) -> bool:
 		"_PlayStreamSE", "_FadeStreamSE", "_StopStreamSE", "_ChangeVolumeOfStreamSE",
 		"_PlayVoice", "_StopVoice", "_WaitToFinishSE", "_Wait",
 		"SoundStopAll", "SetBustshotTime", "AutoSave", "Random",
+		"_Font", "_SetLocalShortStrings", "_ExecuteScheduledControl",
 		"_PlayMovie", "StartEndroll", "DrawEndroll",
 		"SelectTalk", "SelectTopic", "SelectMail", "_SelectEx",
 	]
@@ -661,45 +716,85 @@ func _handle_builtin_external(fn_name: String) -> void:
 			var kind_tag := "_SelectEx" if title_str.is_empty() else ("_SelectEx:" + title_str)
 			choice_requested.emit(kind_tag, clean_opts)
 			wait_state = WaitState.CHOICE
-		"SelectTalk", "SelectTopic", "SelectMail":
-			var args := _pop_all_frame_args(12)
+		"SelectTalk":
+			var args := _pop_all_frame_args(6)
 			var clean_opts: Array = []
-			var expected_cnt := int(args[0]) if args.size() >= 1 and (args[0] is int or args[0] is float) and int(args[0]) > 0 and int(args[0]) <= 8 else 0
 			for v in args:
 				if v is String and not str(v).is_empty():
 					clean_opts.append(str(v))
-					if expected_cnt > 0 and clean_opts.size() >= expected_cnt:
-						break
+			choice_requested.emit(fn_name, clean_opts if not clean_opts.is_empty() else args)
+			wait_state = WaitState.CHOICE
+		"SelectTopic":
+			var args := _pop_all_frame_args(13)
+			var clean_opts: Array = []
+			for v in args:
+				if v is String and not str(v).is_empty():
+					clean_opts.append(str(v))
+			choice_requested.emit(fn_name, clean_opts if not clean_opts.is_empty() else args)
+			wait_state = WaitState.CHOICE
+		"SelectMail":
+			var args := _pop_all_frame_args(12)
+			var clean_opts: Array = []
+			for v in args:
+				if v is String and not str(v).is_empty():
+					clean_opts.append(str(v))
 			choice_requested.emit(fn_name, clean_opts if not clean_opts.is_empty() else args)
 			wait_state = WaitState.CHOICE
 		"Random":
-			var args := _pop_all_frame_args(2)
+			var args := _pop_all_frame_args(1)
 			var n := int(args[0]) if args.size() >= 1 else 1
 			var r := randi() % maxi(1, n)
 			_retval = r
+			flags[0] = r
 			_data_stack.append(r)
 		"SoundStopAll":
-			_pop_all_frame_args(2)
+			_pop_all_frame_args(1)
 			audio_command.emit("_StopBGM", [0])
 			audio_command.emit("_StopSE", [0])
 			audio_command.emit("_StopStreamSE", [0])
 			audio_command.emit("_StopVoice", [0])
-		"SetBustshotTime", "AutoSave", "_DrawFilm", "_DrawFilmSx", "_FadeFilm", "StartEndroll", "DrawEndroll":
-			_pop_all_frame_args(8)
-		"_DrawBG", "_EnlargeBG", "_Flash":
-			var args := _pop_all_frame_args(9)
-			stage_command.emit(fn_name, args)
+		"clear_bs":
+			_pop_all_frame_args(1)
+			stage_command.emit("_ClearBS", [0])
+		"SetBustshotTime", "AutoSave", "_ExecuteScheduledControl":
+			_pop_all_frame_args(1)
+		"_DrawFilm", "DrawEndroll":
+			_pop_all_frame_args(7)
+		"_DrawFilmSx":
+			_pop_all_frame_args(4)
+		"_FadeFilm":
+			_pop_all_frame_args(2)
+		"StartEndroll":
+			_pop_all_frame_args(5)
+		"_DrawBG":
+			var args := _pop_all_frame_args(8)
+			if args.size() >= 1:
+				last_bg = str(args[0])
+			stage_command.emit("_DrawBG", args)
+		"_EnlargeBG":
+			var args := _pop_all_frame_args(10)
+			stage_command.emit("_EnlargeBG", args)
+		"_Flash":
+			var args := _pop_all_frame_args(5)
+			stage_command.emit("_Flash", args)
 		"_ChangeVolumeOfBGM", "_ChangeVolumeOfStreamSE":
-			var args := _pop_all_frame_args(4)
+			var args := _pop_all_frame_args(3)
 			audio_command.emit(fn_name, args)
 		"_PlayMovie":
-			var args := _pop_all_frame_args(4)
+			var args := _pop_all_frame_args(3)
 			stage_command.emit("_PlayMovie", args)
-		"_SetLocalShortStrings", "_Font", "_ExecuteScheduledControl":
-			_pop_all_frame_args(4)
+		"_SetLocalShortStrings":
+			_pop_all_frame_args(2)
+		"_Font":
+			_pop_all_frame_args(3)
 		_:
 			unknown_externals[fn_name] = int(unknown_externals.get(fn_name, 0)) + 1
 			_data_stack.append(0)
+
+
+func _to_i32(v: int) -> int:
+	var u := v & 0xFFFFFFFF
+	return u - 0x100000000 if (u & 0x80000000) != 0 else u
 
 
 func _pop_all_frame_args(limit: int) -> Array:
@@ -833,4 +928,6 @@ func normalize_dialogue_text(raw_t: String) -> String:
 	t = t.replace("主人公（姓）", player_family_name)
 	t = t.replace("主人公（名）", player_given_name)
 	t = t.replace("⒗", "・")
+	if t.ends_with("<"):
+		t = t.substr(0, t.length() - 1)
 	return t

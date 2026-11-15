@@ -170,6 +170,7 @@ var _selected_mouse_bind_target: String = "right_click"
 
 # 快捷键设置状态
 var _waiting_key_action: String = ""
+var _key_notice_override: String = ""
 var _key_notice_label: Label
 
 # 新游戏姓名输入与序章跳过弹窗
@@ -182,6 +183,7 @@ var _btn_name_done: TextureButton
 var _prologue_skip_overlay: Control
 
 # Log 控件与数据
+var _log_scroll: ScrollContainer
 var _log_list_vbox: VBoxContainer
 var _backlog: Array[Dictionary] = []
 
@@ -226,6 +228,7 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			if event.keycode == KEY_ESCAPE:
 				_waiting_key_action = ""
+				_key_notice_override = ""
 				_rebuild_sys_page()
 				return
 			var key_str := OS.get_keycode_string(event.keycode)
@@ -233,13 +236,14 @@ func _input(event: InputEvent) -> void:
 				return
 			for k in _cfg.key_bindings.keys():
 				if k != _waiting_key_action and str(_cfg.key_bindings[k]).to_upper() == key_str.to_upper():
-					if _key_notice_label != null:
-						_key_notice_label.text = "按键 [%s] 已被其他功能占用，无法重复设置同一按键。" % key_str
+					_key_notice_override = "按键 [%s] 已被其他功能占用，无法重复设置同一按键。" % key_str
 					_waiting_key_action = ""
+					_rebuild_sys_page()
 					return
 			_cfg.key_bindings[_waiting_key_action] = key_str
 			_cfg.save_config()
 			_waiting_key_action = ""
+			_key_notice_override = ""
 			config_changed.emit()
 			_rebuild_sys_page()
 
@@ -643,6 +647,14 @@ func show_choices(kind: String, options: Array) -> void:
 		choice_vbox.add_child(b)
 	choice_panel.visible = true
 	modal_backdrop.visible = true
+	if _cfg != null and _cfg.cursor_auto_move:
+		var first_btn: Button = null
+		for child in choice_vbox.get_children():
+			if child is Button:
+				first_btn = child
+				break
+		if first_btn != null:
+			call_deferred("_auto_move_cursor_to", first_btn)
 
 
 func has_open_modal() -> bool:
@@ -700,6 +712,17 @@ func show_confirm(dialog_tex_entry: String, fallback_msg: String, on_yes: Callab
 		_confirm_msg_lbl.visible = true
 	_confirm_overlay.visible = true
 	modal_backdrop.visible = true
+	if _cfg != null and _cfg.cursor_auto_move and _confirm_yes_btn != null:
+		call_deferred("_auto_move_cursor_to", _confirm_yes_btn)
+
+
+func _auto_move_cursor_to(ctrl: Control) -> void:
+	if ctrl == null or not is_instance_valid(ctrl) or not ctrl.is_visible_in_tree():
+		return
+	ctrl.grab_focus()
+	if DisplayServer.get_name() != "headless" and get_viewport() != null:
+		var target_pos := ctrl.get_global_rect().get_center()
+		get_viewport().warp_mouse(target_pos)
 
 
 func save_game_to_slot(slot: int, payload: Dictionary, shot_img: Image = null) -> bool:
@@ -1365,6 +1388,7 @@ func _refresh_sys_nav_state() -> void:
 func _switch_sys_page(key: String) -> void:
 	_current_sys_page = key
 	_waiting_key_action = ""
+	_key_notice_override = ""
 	_is_save_mode = (key == "save")
 	save_load_panel.visible = (key == "save" or key == "load")
 	config_panel.visible = not save_load_panel.visible
@@ -1375,6 +1399,7 @@ func _rebuild_sys_page() -> void:
 	if _sys_content_root == null:
 		return
 	for c in _sys_content_root.get_children():
+		_sys_content_root.remove_child(c)
 		c.queue_free()
 
 	if _font != null:
@@ -1462,7 +1487,7 @@ func _rebuild_sys_page() -> void:
 # 1. 画面设置 (Display - QQ20261115-123928.png)
 # ==============================================================================
 func _build_tab_display() -> void:
-	_add_sky_mask(Vector2(246, 90), Vector2(354, 412))
+	_add_sky_mask(Vector2(240, 86), Vector2(364, 424))
 
 	# 1) 画面尺寸：全屏 / 1280 × 720
 	_add_option_choice("全屏", Vector2(256, 97), _cfg.fullscreen, func() -> void:
@@ -1494,7 +1519,9 @@ func _build_tab_display() -> void:
 		ws_btn.name = "BtnWidescreen_%d" % i
 		if not _cfg.fullscreen:
 			ws_btn.disabled = true
-			ws_btn.modulate = Color(0.85, 0.88, 0.94, 0.48)
+			ws_btn.add_theme_color_override("font_disabled_color", Color(0.46, 0.52, 0.62, 0.90))
+			ws_btn.add_theme_color_override("font_outline_color", Color(0.88, 0.94, 1.0, 0.85))
+			ws_btn.add_theme_constant_override("outline_size", 3)
 
 	# 3) 显示文字框：通常 / 分割
 	_add_option_choice("通常", Vector2(256, 280), _cfg.face_window_mode == 0, func() -> void:
@@ -1723,13 +1750,13 @@ func _build_tab_text() -> void:
 			_add_slash_label(Vector2(cont_slash_xs[c_i], 520))
 
 	# 9) 自动模式时的左键：结束自动模式 / 文字显示
-	_add_option_choice("结束自动模式", Vector2(236, 584), _cfg.auto_click_mode == 0, func() -> void:
+	_add_option_choice("结束自动模式", Vector2(232, 584), _cfg.auto_click_mode == 0, func() -> void:
 		_cfg.auto_click_mode = 0
 		_cfg.save_config()
 		_rebuild_sys_page()
 	)
-	_add_slash_label(Vector2(368, 584))
-	_add_option_choice("文字显示", Vector2(394, 584), _cfg.auto_click_mode == 1, func() -> void:
+	_add_slash_label(Vector2(380, 584))
+	_add_option_choice("文字显示", Vector2(408, 584), _cfg.auto_click_mode == 1, func() -> void:
 		_cfg.auto_click_mode = 1
 		_cfg.save_config()
 		_rebuild_sys_page()
@@ -1753,9 +1780,19 @@ func _build_tab_text() -> void:
 			pressed = true
 			lpos = ev.position
 		if pressed:
-			var h_val := clampf(lpos.x / 432.0, 0.0, 1.0)
-			var v_ratio := clampf(lpos.y / 116.0, 0.0, 1.0)
-			var picked := Color.from_hsv(h_val, clampf(v_ratio * 1.4, 0.15, 1.0), clampf(1.3 - v_ratio * 0.9, 0.2, 1.0))
+			var picked: Color
+			var bg_img: Image = _sys_bg_rect.texture.get_image() if (_sys_bg_rect != null and _sys_bg_rect.texture != null) else null
+			if bg_img != null and bg_img.get_width() > 0 and bg_img.get_height() > 0:
+				var lx := clampf(lpos.x, 0.0, 431.0)
+				var ly := clampf(lpos.y, 0.0, 115.0)
+				var ix := clampi(int(round((610.0 + lx) * float(bg_img.get_width()) / 1280.0)), 0, bg_img.get_width() - 1)
+				var iy := clampi(int(round((364.0 + ly) * float(bg_img.get_height()) / 720.0)), 0, bg_img.get_height() - 1)
+				picked = bg_img.get_pixel(ix, iy)
+				picked.a = 1.0
+			else:
+				var h_val := clampf(lpos.x / 432.0, 0.0, 1.0)
+				var v_ratio := clampf(lpos.y / 116.0, 0.0, 1.0)
+				picked = Color.from_hsv(h_val, clampf(v_ratio * 1.4, 0.15, 1.0), clampf(1.3 - v_ratio * 0.9, 0.2, 1.0))
 			_apply_picked_text_color(picked)
 	)
 	_sys_content_root.add_child(pal_ctrl)
@@ -1809,9 +1846,21 @@ func _apply_picked_text_color(col: Color) -> void:
 			dialogue_label.add_theme_color_override("default_color", col)
 	if _color_now_swatch != null:
 		_color_now_swatch.color = col
-	if _preview_sample_label != null:
-		_preview_sample_label.add_theme_color_override("default_color", col)
+	_refresh_sample_preview_text()
 	_cfg.save_config()
+
+
+func _refresh_sample_preview_text() -> void:
+	if _preview_sample_label == null or _cfg == null:
+		return
+	var u_hex := _cfg.text_color.to_html(false)
+	var r_hex := _cfg.read_text_color.to_html(false)
+	_preview_sample_label.bbcode_enabled = true
+	if _current_sys_page == "text":
+		_preview_sample_label.text = "[color=#%s]未读文本：「这是对话文字颜色设置范例。」[/color]\n[color=#%s]已读文本：「这是已读文字颜色设置范例。」[/color]" % [u_hex, r_hex]
+	else:
+		var mode_tag := "通常（含头像框）" if _cfg.face_window_mode == 0 else "分割（隐藏头像框）"
+		_preview_sample_label.text = "[color=#%s]【%s %s】%s\n「这是对话窗口透明度与文字显示范例。」[/color]" % [u_hex, _cfg.player_family_name, _cfg.player_given_name, mode_tag]
 
 
 func _build_sample_preview_box(pos: Vector2, sz: Vector2) -> void:
@@ -1843,19 +1892,44 @@ func _build_sample_preview_box(pos: Vector2, sz: Vector2) -> void:
 	box.add_child(msg_panel)
 	_preview_msg_bg = msg_panel
 
+	var text_left := 16.0
+	if _cfg.face_window_mode == 0:
+		var face_box := Panel.new()
+		face_box.name = "SampleFaceSlot"
+		face_box.position = Vector2(12, sz.y - 84)
+		face_box.size = Vector2(64, 76)
+		var fsb := StyleBoxFlat.new()
+		fsb.bg_color = Color(0.22, 0.52, 0.86, 0.72)
+		fsb.border_color = Color(0.85, 0.95, 1.0, 0.9)
+		fsb.set_border_width_all(1)
+		fsb.set_corner_radius_all(8)
+		face_box.add_theme_stylebox_override("panel", fsb)
+		var flbl := Label.new()
+		flbl.set_anchors_preset(Control.PRESET_FULL_RECT)
+		flbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		flbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		flbl.text = "头像"
+		if _font != null:
+			flbl.add_theme_font_override("font", _font)
+		flbl.add_theme_font_size_override("font_size", 14)
+		flbl.add_theme_color_override("font_color", Color.WHITE)
+		face_box.add_child(flbl)
+		box.add_child(face_box)
+		text_left = 86.0
+
 	_preview_sample_label = RichTextLabel.new()
-	_preview_sample_label.position = Vector2(18, sz.y - 84)
-	_preview_sample_label.size = Vector2(sz.x - 36, 78)
+	_preview_sample_label.position = Vector2(text_left, sz.y - 84)
+	_preview_sample_label.size = Vector2(sz.x - text_left - 14.0, 78)
 	_preview_sample_label.scroll_active = false
+	_preview_sample_label.bbcode_enabled = true
 	if _font != null:
 		_preview_sample_label.add_theme_font_override("normal_font", _font)
-	_preview_sample_label.add_theme_font_size_override("normal_font_size", 16)
-	var sample_col := _cfg.read_text_color if (_current_sys_page == "text" and _color_edit_target == "read") else _cfg.text_color
-	_preview_sample_label.add_theme_color_override("default_color", sample_col)
+	_preview_sample_label.add_theme_font_size_override("normal_font_size", 15)
+	_preview_sample_label.add_theme_color_override("default_color", Color.WHITE)
 	_preview_sample_label.add_theme_color_override("font_outline_color", Color(0.04, 0.04, 0.08, 0.95))
-	_preview_sample_label.add_theme_constant_override("outline_size", 4)
-	_preview_sample_label.text = "【%s %s】\n「这是对话窗口透明度与文字颜色的设置范例。」" % [_cfg.player_family_name, _cfg.player_given_name]
+	_preview_sample_label.add_theme_constant_override("outline_size", 3)
 	box.add_child(_preview_sample_label)
+	_refresh_sample_preview_text()
 
 
 # ==============================================================================
@@ -2043,7 +2117,8 @@ func _build_tab_sound() -> void:
 	pct_lbl.add_theme_constant_override("outline_size", 4)
 	_sys_content_root.add_child(pct_lbl)
 
-	var btn_char_test := _make_test_button(Vector2(512, 434))
+	var btn_char_test := _make_test_button(Vector2(510, 429))
+	btn_char_test.size = Vector2(78, 33)
 	btn_char_test.name = "BtnTestCharVoice"
 	var sample_voice: String = str(sel_info["sample"])
 	btn_char_test.pressed.connect(func() -> void: voice_replay_requested.emit(sample_voice))
@@ -2210,7 +2285,7 @@ func _build_tab_system() -> void:
 	at_lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
 	at_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	at_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	at_lbl.text = "分配功能选择"
+	at_lbl.text = "选择分配功能"
 	if _font != null:
 		at_lbl.add_theme_font_override("font", _font)
 	at_lbl.add_theme_font_size_override("font_size", 18)
@@ -2331,21 +2406,23 @@ func _build_tab_keys() -> void:
 		kbtn.add_theme_stylebox_override("hover", k_sb)
 		kbtn.pressed.connect(func() -> void:
 			_waiting_key_action = kid
+			_key_notice_override = ""
 			_rebuild_sys_page()
 		)
 		_sys_content_root.add_child(kbtn)
 
-	if not _waiting_key_action.is_empty():
+	if not _waiting_key_action.is_empty() or not _key_notice_override.is_empty():
 		var notice_bg := Panel.new()
 		notice_bg.position = Vector2(160, 544)
 		notice_bg.size = Vector2(729, 44)
 		var nb_sb := StyleBoxFlat.new()
-		nb_sb.bg_color = Color8(0, 71, 157, 255)
+		nb_sb.bg_color = Color8(168, 38, 38, 255) if not _key_notice_override.is_empty() else Color8(0, 71, 157, 255)
 		nb_sb.set_corner_radius_all(10)
 		notice_bg.add_theme_stylebox_override("panel", nb_sb)
 		_sys_content_root.add_child(notice_bg)
 
 	_key_notice_label = Label.new()
+	_key_notice_label.name = "KeyNoticeLabel"
 	_key_notice_label.position = Vector2(160, 544)
 	_key_notice_label.size = Vector2(729, 44)
 	_key_notice_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2354,7 +2431,12 @@ func _build_tab_keys() -> void:
 		_key_notice_label.add_theme_font_override("font", _font)
 	_key_notice_label.add_theme_font_size_override("font_size", 19)
 	_key_notice_label.add_theme_color_override("font_color", Color.WHITE)
-	_key_notice_label.text = "请按下要绑定的新按键（按 Esc 键取消更改）..." if not _waiting_key_action.is_empty() else ""
+	if not _key_notice_override.is_empty():
+		_key_notice_label.text = _key_notice_override
+	elif not _waiting_key_action.is_empty():
+		_key_notice_label.text = "请按下要绑定的新按键（按 Esc 键取消更改）..."
+	else:
+		_key_notice_label.text = ""
 	_sys_content_root.add_child(_key_notice_label)
 
 
@@ -2419,6 +2501,8 @@ func _build_tab_save_load(save_mode: bool) -> void:
 		card_btn.add_theme_stylebox_override("normal", c_sb)
 		card_btn.add_theme_stylebox_override("hover", c_sb)
 		card_btn.mouse_entered.connect(func() -> void:
+			if _save_comment_edit != null and _save_comment_edit.has_focus():
+				return
 			if _selected_slot != slot:
 				_selected_slot = slot
 				_update_save_detail_panel()
@@ -2633,15 +2717,17 @@ func _build_log_panel() -> void:
 	fallback.show_behind_parent = true
 	log_bg.add_child(fallback)
 
-	var scroll := ScrollContainer.new()
-	scroll.position = Vector2(96, 56)
-	scroll.size = Vector2(980, 610)
-	log_panel.add_child(scroll)
+	_log_scroll = ScrollContainer.new()
+	_log_scroll.name = "LogScroll"
+	_log_scroll.position = Vector2(104, 62)
+	_log_scroll.size = Vector2(932, 594)
+	_log_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	log_panel.add_child(_log_scroll)
 
 	_log_list_vbox = VBoxContainer.new()
 	_log_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_log_list_vbox.add_theme_constant_override("separation", 12)
-	scroll.add_child(_log_list_vbox)
+	_log_scroll.add_child(_log_list_vbox)
 
 	log_text = RichTextLabel.new()
 	log_text.visible = false
@@ -2724,6 +2810,17 @@ func _open_log_panel() -> void:
 	_close_all_modals()
 	modal_backdrop.visible = true
 	log_panel.visible = true
+	call_deferred("_scroll_log_to_bottom")
+
+
+func _scroll_log_to_bottom() -> void:
+	if _log_scroll == null or not is_instance_valid(_log_scroll):
+		return
+	var vb := _log_scroll.get_v_scroll_bar()
+	if vb != null:
+		_log_scroll.scroll_vertical = int(vb.max_value)
+	else:
+		_log_scroll.scroll_vertical = 999999
 
 
 func _build_byoa_panel() -> void:

@@ -17,6 +17,9 @@ var _nude_flag: bool = false
 var _global_flags: Dictionary = {} # int -> int
 var _read_bits: Dictionary = {} # script_lower -> PackedByteArray
 var _gdb_entries: Array[String] = []
+var _read_dirty: bool = false
+
+const READ_STATE_PATH := "user://read_state.json"
 
 
 func _init(vfs: BgiVfs = null) -> void:
@@ -306,15 +309,18 @@ func _decode_sdc(raw: PackedByteArray) -> PackedByteArray:
 
 
 func mark_line_read(script_name: String, line_no: int) -> void:
-	if line_no < 0:
+	if line_no < 0 or script_name.is_empty():
 		return
 	var key := script_name.to_lower()
 	var bits: PackedByteArray = _read_bits.get(key, PackedByteArray())
 	var byte_idx := line_no >> 3
 	if bits.size() <= byte_idx:
 		bits.resize(byte_idx + 64)
-	bits[byte_idx] = bits[byte_idx] | (1 << (line_no & 7))
-	_read_bits[key] = bits
+	var mask := 1 << (line_no & 7)
+	if (bits[byte_idx] & mask) == 0:
+		bits[byte_idx] = bits[byte_idx] | mask
+		_read_bits[key] = bits
+		_read_dirty = true
 
 
 func is_line_read(script_name: String, line_no: int) -> bool:
@@ -341,8 +347,44 @@ func export_read_state() -> Dictionary:
 
 func import_read_state(data: Dictionary) -> void:
 	for k in data.keys():
-		var b64 := str(data[k])
-		_read_bits[str(k).to_lower()] = Marshalls.base64_to_raw(b64)
+		var key := str(k).to_lower()
+		var incoming := Marshalls.base64_to_raw(str(data[k]))
+		var existing: PackedByteArray = _read_bits.get(key, PackedByteArray())
+		if existing.is_empty():
+			_read_bits[key] = incoming
+		else:
+			if existing.size() < incoming.size():
+				existing.resize(incoming.size())
+			for i in range(incoming.size()):
+				existing[i] = existing[i] | incoming[i]
+			_read_bits[key] = existing
+
+
+func save_global_read_state(path: String = READ_STATE_PATH, force: bool = false) -> bool:
+	if not force and not _read_dirty:
+		return true
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		return false
+	f.store_string(JSON.stringify(export_read_state()))
+	f.close()
+	_read_dirty = false
+	return true
+
+
+func load_global_read_state(path: String = READ_STATE_PATH) -> bool:
+	if not FileAccess.file_exists(path):
+		return false
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return false
+	var parsed = JSON.parse_string(f.get_as_text())
+	f.close()
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return false
+	import_read_state(parsed)
+	_read_dirty = false
+	return true
 
 
 func _read_int_le(buf: PackedByteArray, pos: int, n: int, signed: bool) -> int:
