@@ -4,7 +4,7 @@
 
 1. **云端编译 iOS 原生空壳（仅首次或修改 C 原生库时需要）**：
    - 将仓库推送至 GitHub 后，触发 Actions 工作流 `.github/workflows/ios-ipa.yml`；
-   - 下载产物 `Fureraba-iOS-AppShell` 并解压出 `Fureraba_iOS.app`，放到 `U:\anti\projects\Fureraba_iOS\build\ios\Fureraba_iOS.app`。
+   - 下载产物 `Fureraba_iOS_TrollStore`，将其中的 `Fureraba_iOS_Shell.zip` 解压出 `Fureraba_iOS.app`，放到 `U:\anti\projects\Fureraba_iOS\build\ios\Fureraba_iOS.app`（`build\.gdignore` 会自动阻止 Godot 扫描空壳目录）。
 2. **Windows 本地 3 秒热打包**：
    - 双击运行项目根目录的 `打包TrollStore_PCK与IPA.bat`，或在终端执行：
      ```powershell

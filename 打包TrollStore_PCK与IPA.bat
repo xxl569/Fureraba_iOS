@@ -8,7 +8,7 @@ if errorlevel 1 goto :err
 
 if not exist "build\ios\Fureraba_iOS.app" (
     echo [提示] 未找到 build\ios\Fureraba_iOS.app 空壳，仅完成了 .pck 导出。
-    echo 请先从 GitHub Actions 下载 Fureraba-iOS-AppShell 并解压至 build\ios\Fureraba_iOS.app 后再打包 .ipa。
+    echo 请先从 GitHub Actions 下载 Fureraba_iOS_TrollStore 产物中的 Fureraba_iOS_Shell.zip 并解压至 build\ios\Fureraba_iOS.app 后再打包 .ipa。
     pause
     exit /b 0
 )

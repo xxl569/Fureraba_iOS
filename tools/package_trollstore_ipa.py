@@ -544,6 +544,20 @@ def verify_ipa(
                 f"IPA 内 .pck 数量或命名异常（期望唯一 {expected_pck_arc}）: {pck_entries}"
             )
 
+        junk_entries = [
+            n
+            for n in names
+            if n.lower().endswith(".import")
+            or n.endswith("/.DS_Store")
+            or n == ".DS_Store"
+            or "/__MACOSX/" in n
+            or n.startswith("__MACOSX/")
+        ]
+        if junk_entries:
+            raise ValueError(
+                f"IPA 内包含未清理的编辑器/系统垃圾文件: {junk_entries[:5]}"
+            )
+
         with tempfile.TemporaryDirectory(prefix="henpri_verify_") as td:
             td_path = Path(td)
             tmp_exec = td_path / exec_name
@@ -593,6 +607,17 @@ def export_pck(
     preset: str = "iOS",
 ) -> dict[str, Any]:
     out_pck_path.parent.mkdir(parents=True, exist_ok=True)
+    # 若导出目标位于工程 build/ 目录下，自动写入 .gdignore 防止 Godot 扫描空壳 .app 并生成 .import 垃圾文件
+    build_dir = (project_dir / "build").resolve()
+    try:
+        out_pck_path.resolve().relative_to(build_dir)
+    except ValueError:
+        pass
+    else:
+        gdignore = build_dir / ".gdignore"
+        if not gdignore.exists():
+            gdignore.write_text("", encoding="utf-8")
+
     cmd = [
         str(godot_exe),
         "--headless",
@@ -644,12 +669,16 @@ def package_trollstore_ipa(
         work_dir = Path(td)
         app_dir = _resolve_app_shell(app_shell, work_dir)
 
-        # 移除旧苹果 CMS 签名与 macOS 元数据，避免重签后校验冲突
+        # 移除旧苹果 CMS 签名、macOS 元数据与 Godot 误扫描生成的 .import 文件，避免污染 .ipa
         old_sig = app_dir / "_CodeSignature"
         if old_sig.exists():
             shutil.rmtree(old_sig)
-        for ds in app_dir.rglob(".DS_Store"):
-            ds.unlink()
+        for macosx_dir in sorted(app_dir.rglob("__MACOSX"), reverse=True):
+            if macosx_dir.is_dir():
+                shutil.rmtree(macosx_dir)
+        for junk in sorted(app_dir.rglob("*")):
+            if junk.is_file() and (junk.name == ".DS_Store" or junk.suffix.lower() == ".import"):
+                junk.unlink()
 
         plist_data = patch_info_plist(
             app_dir / "Info.plist",
