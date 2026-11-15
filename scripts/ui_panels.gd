@@ -443,6 +443,7 @@ func hide_byoa_guide() -> void:
 
 
 func show_title_menu(has_movie: bool) -> void:
+	_close_all_modals(true)
 	_sys_in_game = false
 	dialogue_panel.visible = false
 	quick_menu.visible = false
@@ -458,7 +459,7 @@ func show_title_menu(has_movie: bool) -> void:
 
 func hide_title_menu() -> void:
 	title_overlay.visible = false
-	_close_all_modals()
+	_close_all_modals(true)
 	_sys_in_game = true
 	quick_menu.visible = true
 
@@ -3379,12 +3380,13 @@ func _apply_dialogue_opacity() -> void:
 		_msg_fallback_bg.modulate.a = _cfg.dialogue_opacity
 
 
-func _close_all_modals() -> void:
+func _close_all_modals(include_choices: bool = false) -> void:
 	sys_menu_panel.visible = false
 	save_load_panel.visible = false
 	config_panel.visible = false
 	log_panel.visible = false
-	choice_panel.visible = false
+	if include_choices:
+		choice_panel.visible = false
 	if gallery_panel != null:
 		gallery_panel.visible = false
 	_confirm_overlay.visible = false

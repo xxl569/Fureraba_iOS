@@ -319,12 +319,13 @@ func _connect_signals() -> void:
 		ui.show_choices(kind, options)
 	)
 	vm.vm_script_changed.connect(func(sname: String) -> void:
+		var low := sname.to_lower()
 		if _in_game and _skip_mode and cfg != null and cfg.skip_continue_mode == 2:
-			if not _last_script_for_skip.is_empty() and sname != _last_script_for_skip:
+			if not _last_script_for_skip.is_empty() and low != _last_script_for_skip:
 				# 跨天/章节剧本切换时停止快进
-				if sname.begins_with("b_days_") or sname.begins_with("c_"):
+				if low.begins_with("b_days_") or low.begins_with("c_"):
 					_set_skip_mode(false)
-		_last_script_for_skip = sname
+		_last_script_for_skip = low
 	)
 
 	audio_mgr.bgm_started.connect(ui.show_bgm_telop)

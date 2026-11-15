@@ -513,6 +513,59 @@ func _init() -> void:
 	main.bp_vm._read_bits = bk_bits
 	main.bp_vm._read_dirty = false
 
+	# 25. 回归验证：分支选择弹窗不被 Esc 误关死锁、一天结束停止快进大小写兼容、读档恢复语音/头像与待标已读行
+	main.cfg.reset_to_defaults()
+	main.start_new_game()
+	main.ui.show_choices("Choice", ["选项一", "选项二"])
+	var esc_choice_ev := InputEventKey.new()
+	esc_choice_ev.keycode = KEY_ESCAPE
+	esc_choice_ev.pressed = true
+	main._unhandled_input(esc_choice_ev)
+	if not main.ui.choice_panel.visible:
+		push_error("Pressing ESC during Choice hid choice_panel and soft-locked game")
+		quit(62)
+		return
+	main.ui.hide_title_menu()
+	if main.ui.choice_panel.visible:
+		push_error("hide_title_menu() should clear leftover choice_panel")
+		quit(63)
+		return
+
+	main.cfg.skip_continue_mode = 2
+	main._in_game = true
+	main._last_script_for_skip = "a_prologue01"
+	main._set_skip_mode(true)
+	main.vm.vm_script_changed.emit("B_days_0423")
+	if main._skip_mode:
+		push_error("skip_continue_mode=2 failed to stop skip on uppercase day script switch")
+		quit(64)
+		return
+
+	var test_save_sc := "__ut_save_read_probe"
+	main.bp_vm._read_bits.erase(test_save_sc)
+	var save_state: Dictionary = main.vm.export_save_state()
+	save_state["current_script"] = main.vm.current_script
+	save_state["current_line"] = 777
+	save_state["last_dialogue_text"] = "读档已读测试台词"
+	save_state["last_voice_entry"] = "TEST_VOICE_01"
+	save_state["last_face_img"] = "TEST_FACE_01"
+	main.vm.last_voice_entry = "STALE_VOICE"
+	main.vm.last_face_img = "STALE_FACE"
+	if not main.vm.import_save_state(save_state):
+		push_error("import_save_state failed")
+		quit(65)
+		return
+	if main.vm.last_voice_entry != "TEST_VOICE_01" or main.vm.last_face_img != "TEST_FACE_01":
+		push_error("import_save_state did not restore last_voice_entry/last_face_img")
+		quit(66)
+		return
+	if main.vm._pending_read_script != main.vm.current_script or main.vm._pending_read_line != 777:
+		push_error("import_save_state did not restore pending read marker")
+		quit(67)
+		return
+	main.bp_vm._read_bits = bk_bits
+	main.bp_vm._read_dirty = false
+
 	main.cfg.reset_to_defaults()
 	main.cfg.save_config()
 	main.queue_free()

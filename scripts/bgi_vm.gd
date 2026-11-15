@@ -940,6 +940,8 @@ func export_save_state() -> Dictionary:
 		"last_speaker": last_speaker,
 		"last_bg": last_bg,
 		"last_bgm": last_bgm,
+		"last_voice_entry": last_voice_entry,
+		"last_face_img": last_face_img,
 		"current_line": current_line,
 	}
 
@@ -981,8 +983,17 @@ func import_save_state(state: Dictionary) -> bool:
 	last_speaker = str(state.get("last_speaker", ""))
 	last_bg = str(state.get("last_bg", ""))
 	last_bgm = str(state.get("last_bgm", ""))
+	last_voice_entry = str(state.get("last_voice_entry", ""))
+	last_face_img = str(state.get("last_face_img", ""))
 	current_line = int(state.get("current_line", 0))
-	wait_state = WaitState.CLICK if not last_dialogue_text.is_empty() else WaitState.NONE
+	if not last_dialogue_text.is_empty():
+		_pending_read_script = current_script
+		_pending_read_line = current_line
+		wait_state = WaitState.CLICK
+	else:
+		_pending_read_script = ""
+		_pending_read_line = -1
+		wait_state = WaitState.NONE
 	return true
 
 
