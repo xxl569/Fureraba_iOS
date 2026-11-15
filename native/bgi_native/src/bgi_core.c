@@ -467,7 +467,7 @@ static int decode_dsc_buf(const uint8_t *data, uint32_t data_len, uint8_t **out_
     }
 
     int max_depth = list[list_n - 1].depth;
-    if (max_depth > 24) return -3;
+    if (max_depth > 31) return -3;
     int table_bits = max_depth < 12 ? max_depth : 12;
     uint32_t table_size = 1u << table_bits;
 

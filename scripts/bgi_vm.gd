@@ -50,13 +50,55 @@ var last_speaker: String = ""
 var last_voice_entry: String = ""
 var last_bg: String = ""
 var last_bgm: String = ""
+var last_face_img: String = ""
 var current_line: int = 0
 var current_src_file: String = ""
 var flags: Dictionary = {}
 var caption: String = "フレラバ 〜Friend to Lover〜"
+var player_family_name: String = "青葉"
+var player_given_name: String = "恭介"
 var music_telop: Dictionary = {}
 var unknown_opcodes: Dictionary = {}
 var unknown_externals: Dictionary = {}
+
+const SPEAKER_JP_MAP: Dictionary = {
+	"阳茉莉": "陽茉莉",
+	"皆原 阳茉莉": "皆原 陽茉莉",
+	"阳茉莉妈妈": "陽茉莉的妈妈",
+	"阳茉莉爸爸": "陽茉莉的爸爸",
+	"理奈": "理奈",
+	"望月 理奈": "望月 理奈",
+	"柚夕": "ゆずゆ",
+	"柊 柚夕": "柊 ゆずゆ",
+	"柚夕的妈妈": "ゆずゆ的妈妈",
+	"柚夕的弟弟": "ゆずゆ的弟弟",
+	"柚子由": "ゆずゆ",
+	"柊 柚子由": "柊 ゆずゆ",
+	"柚子由的妈妈": "ゆずゆ的妈妈",
+	"柚子由妈妈": "ゆずゆ的妈妈",
+	"柚子由的弟弟": "ゆずゆ的弟弟",
+	"柚子由弟弟": "ゆずゆ的弟弟",
+	"岬": "岬",
+	"泽渡 岬": "沢渡 岬",
+	"元气": "元気",
+	"濑野 元气": "瀬野 元気",
+	"智美": "智美",
+	"野野村 智美": "野々村 智美",
+	"真寻": "まひろ",
+	"绫部 真寻": "綾部 まひろ",
+	"真子": "真子",
+	"水澄 真子": "水澄 真子",
+	"桃": "桃",
+	"须贺崎 桃": "須賀崎 桃",
+	"正义": "正義",
+	"近藤 正义": "近藤 正義",
+	"青叶 恭介": "青葉 恭介",
+	"青叶": "青葉",
+	"水野 菜菜": "水野 菜々",
+	"百百濑 实里": "百々瀬 みのり",
+	"女子生徒Ａ": "女学生Ａ",
+	"男子生徒Ａ": "男学生Ａ",
+}
 
 
 func _init(vfs: BgiVfs = null, bp_vm: BgiBpVm = null) -> void:
@@ -258,8 +300,8 @@ func _exec_one() -> void:
 	match op:
 		0x00: # PUSH_INT
 			_data_stack.append(a0)
-		0x01: # PUSH_ADDR_REL
-			_data_stack.append(off + a0)
+		0x01: # PUSH_ADDR_ABS (BCS1 代码段绝对字节偏移)
+			_data_stack.append(a0)
 		0x02: # PUSH_OFFSET
 			_data_stack.append(_sp - a0)
 		0x03: # PUSH_STR
@@ -412,7 +454,7 @@ func _exec_one() -> void:
 				_push_call_frame(_ip + 1)
 				start_script(target_sc, 0, false)
 				return
-		0x0F3, 0x0F6: # JUMP_SCRIPT
+		0x0F3: # JUMP_SCRIPT
 			var arg0 = _pop_any()
 			var target_sc := ""
 			if typeof(arg0) == TYPE_INT and not _data_stack.is_empty():
@@ -422,6 +464,13 @@ func _exec_one() -> void:
 			if _vfs != null and _vfs.has_entry(target_sc):
 				start_script(target_sc, 0, false)
 				return
+		0x0F6: # CALL/JUMP_PREP（弹出参数个数 argc，保留目标脚本名给紧随其后的 0xF0/0xF3）
+			var _argc := _pop_int()
+			# 若存在附加参数则保留目标脚本名在栈顶
+			if _argc > 0 and _data_stack.size() > _argc:
+				var _script_name = _pop_any()
+				_pop_n(_argc)
+				_data_stack.append(_script_name)
 		0x0F4: # EXIT_VM
 			wait_state = WaitState.ENDED
 			vm_ended.emit()
@@ -435,14 +484,14 @@ func _exec_one() -> void:
 		0x0F9: # ERROR_DIALOG
 			var _msg := str(_pop_any())
 		0x140: # SYS_TEXT_PRINT
-			var text := str(_pop_any())
+			var text := normalize_dialogue_text(str(_pop_any()))
 			var speaker_arg = _pop_any()
 			var _voice_arg = _pop_any()
 			var _clear_arg = _pop_any()
 			var wait_flag := _pop_int()
 			var speaker := ""
 			if typeof(speaker_arg) == TYPE_STRING and not str(speaker_arg).is_empty():
-				speaker = str(speaker_arg)
+				speaker = normalize_speaker(str(speaker_arg))
 			last_dialogue_text = text
 			last_speaker = speaker
 			if _bp_vm != null:
@@ -459,10 +508,14 @@ func _exec_one() -> void:
 
 
 func _handle_scope_mark(cmd_id: int, args: Array) -> void:
-	if cmd_id == 225 and args.size() >= 1:
+	if (cmd_id == 225 or cmd_id == 229 or cmd_id == 231) and args.size() >= 1:
 		# 读取全局流程标志
 		var idx := int(args[0])
 		_data_stack.append(int(flags.get(idx, 0)))
+	elif cmd_id == 228 and args.size() >= 2:
+		# 写入全局流程标志
+		var idx := int(args[0])
+		flags[idx] = int(args[1])
 	elif cmd_id == 392 and args.size() >= 2:
 		# SetMusicTelop(id, bgm_name, ...)
 		music_telop[str(args[1])] = int(args[0])
@@ -472,16 +525,19 @@ func _handle_scope_mark(cmd_id: int, args: Array) -> void:
 
 func _is_intercepted_external(fn_name: String) -> bool:
 	return fn_name in [
-		"_DrawScene", "_DrawSceneByVirtualBG", "_FadeScene",
+		"_DrawScene", "_DrawSceneByVirtualBG", "_FadeScene", "_DrawBG", "_EnlargeBG",
+		"_DrawFilm", "_DrawFilmSx", "_FadeFilm", "_Flash",
 		"_DrawBS", "_FadeBS", "_MoveBS", "_ShiftBS", "_OrderBS", "_ClearBS",
 		"_DrawFace", "_FadeFace",
 		"_DrawSPR", "_FadeSPR", "_MoveSPR",
 		"_Quake", "_QuakeEx", "StartShakingOfWindowSx", "_ScrollBG",
-		"_PlayBGM", "_FadeBGM", "_StopBGM",
+		"_PlayBGM", "_FadeBGM", "_StopBGM", "_ChangeVolumeOfBGM",
 		"_PlaySE", "_FadeSE", "_StopSE",
-		"_PlayStreamSE", "_FadeStreamSE", "_StopStreamSE",
+		"_PlayStreamSE", "_FadeStreamSE", "_StopStreamSE", "_ChangeVolumeOfStreamSE",
 		"_PlayVoice", "_StopVoice", "_WaitToFinishSE", "_Wait",
-		"SelectTalk", "SelectTopic", "SelectMail",
+		"SoundStopAll", "SetBustshotTime", "AutoSave", "Random",
+		"_PlayMovie", "StartEndroll", "DrawEndroll",
+		"SelectTalk", "SelectTopic", "SelectMail", "_SelectEx",
 	]
 
 
@@ -517,9 +573,15 @@ func _handle_builtin_external(fn_name: String) -> void:
 			stage_command.emit(fn_name, args)
 		"_DrawFace":
 			var args := _pop_all_frame_args(3)
+			last_face_img = ""
+			for a in args:
+				if typeof(a) == TYPE_STRING and not str(a).is_empty():
+					last_face_img = str(a)
+					break
 			stage_command.emit(fn_name, args)
 		"_FadeFace":
 			var args := _pop_all_frame_args(2)
+			last_face_img = ""
 			stage_command.emit(fn_name, args)
 		"_DrawSPR":
 			var args := _pop_all_frame_args(19)
@@ -570,10 +632,69 @@ func _handle_builtin_external(fn_name: String) -> void:
 			if ms > 0:
 				wait_timer_sec = float(ms) / 1000.0
 				wait_state = WaitState.TIMER
-		"SelectTalk", "SelectTopic", "SelectMail":
-			var args := _pop_all_frame_args(8)
-			choice_requested.emit(fn_name, args)
+		"_SelectEx":
+			# BGI _SelectEx 参数格式:
+			# 1) [opt_count, mem_array_ptr, title_or_0]（字符串数组存于 _mem[ptr + i*4]）
+			# 2) [opt_count, flag0, text0, ..., title_or_0]（直接字符串入栈兜底）
+			var clean_opts: Array = []
+			var title_str := ""
+			if _data_stack.size() >= 3 and (_data_stack[-3] is int or _data_stack[-3] is float) and (_data_stack[-2] is int or _data_stack[-2] is float):
+				var cnt_top := int(_data_stack[-3])
+				var ptr_top := int(_data_stack[-2])
+				if cnt_top > 0 and cnt_top <= 16 and _mem.has(ptr_top):
+					var title_arg = _pop_any()
+					var _p = _pop_any()
+					var _c = _pop_any()
+					if title_arg is String and not str(title_arg).is_empty():
+						title_str = str(title_arg)
+					for i in range(cnt_top):
+						var s_val = _mem.get(ptr_top + i * 4, "")
+						if s_val is String and not str(s_val).is_empty():
+							clean_opts.append(str(s_val))
+			if clean_opts.is_empty():
+				var raw_args := _pop_all_frame_args(16)
+				for v in raw_args:
+					if v is String and not str(v).is_empty():
+						clean_opts.append(str(v))
+				if clean_opts.size() >= 2:
+					title_str = str(clean_opts.pop_back())
+			var kind_tag := "_SelectEx" if title_str.is_empty() else ("_SelectEx:" + title_str)
+			choice_requested.emit(kind_tag, clean_opts)
 			wait_state = WaitState.CHOICE
+		"SelectTalk", "SelectTopic", "SelectMail":
+			var args := _pop_all_frame_args(12)
+			var clean_opts: Array = []
+			var expected_cnt := int(args[0]) if args.size() >= 1 and (args[0] is int or args[0] is float) and int(args[0]) > 0 and int(args[0]) <= 8 else 0
+			for v in args:
+				if v is String and not str(v).is_empty():
+					clean_opts.append(str(v))
+					if expected_cnt > 0 and clean_opts.size() >= expected_cnt:
+						break
+			choice_requested.emit(fn_name, clean_opts if not clean_opts.is_empty() else args)
+			wait_state = WaitState.CHOICE
+		"Random":
+			var args := _pop_all_frame_args(2)
+			var n := int(args[0]) if args.size() >= 1 else 1
+			var r := randi() % maxi(1, n)
+			_retval = r
+			_data_stack.append(r)
+		"SoundStopAll":
+			_pop_all_frame_args(2)
+			audio_command.emit("_StopBGM", [0])
+			audio_command.emit("_StopSE", [0])
+			audio_command.emit("_StopStreamSE", [0])
+			audio_command.emit("_StopVoice", [0])
+		"SetBustshotTime", "AutoSave", "_DrawFilm", "_DrawFilmSx", "_FadeFilm", "StartEndroll", "DrawEndroll":
+			_pop_all_frame_args(8)
+		"_DrawBG", "_EnlargeBG", "_Flash":
+			var args := _pop_all_frame_args(9)
+			stage_command.emit(fn_name, args)
+		"_ChangeVolumeOfBGM", "_ChangeVolumeOfStreamSE":
+			var args := _pop_all_frame_args(4)
+			audio_command.emit(fn_name, args)
+		"_PlayMovie":
+			var args := _pop_all_frame_args(4)
+			stage_command.emit("_PlayMovie", args)
 		"_SetLocalShortStrings", "_Font", "_ExecuteScheduledControl":
 			_pop_all_frame_args(4)
 		_:
@@ -682,3 +803,34 @@ func import_save_state(state: Dictionary) -> bool:
 	current_line = int(state.get("current_line", 0))
 	wait_state = WaitState.CLICK if not last_dialogue_text.is_empty() else WaitState.NONE
 	return true
+
+
+func normalize_speaker(raw_sp: String) -> String:
+	if raw_sp.is_empty():
+		return ""
+	var sp := raw_sp.replace("庡恖岞乮惄乯", player_family_name)
+	sp = sp.replace("庡恖岞乮柤乯", player_given_name)
+	sp = sp.replace("主人公（姓）", player_family_name)
+	sp = sp.replace("主人公（名）", player_given_name)
+	sp = sp.replace("⒗", "・")
+	if SPEAKER_JP_MAP.has(sp):
+		return str(SPEAKER_JP_MAP[sp])
+	if sp.contains("・"):
+		var parts := sp.split("・")
+		for i in range(parts.size()):
+			var p := parts[i]
+			if SPEAKER_JP_MAP.has(p):
+				parts[i] = str(SPEAKER_JP_MAP[p])
+		return "・".join(parts)
+	return sp
+
+
+func normalize_dialogue_text(raw_t: String) -> String:
+	if raw_t.is_empty():
+		return ""
+	var t := raw_t.replace("庡恖岞乮惄乯", player_family_name)
+	t = t.replace("庡恖岞乮柤乯", player_given_name)
+	t = t.replace("主人公（姓）", player_family_name)
+	t = t.replace("主人公（名）", player_given_name)
+	t = t.replace("⒗", "・")
+	return t

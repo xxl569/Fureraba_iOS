@@ -4,6 +4,8 @@ extends Node
 ## BGI 三通道音频管理器（BGM / SE / Voice）。
 ## 直接读取 `BgiNative` 提取的 Ogg Vorbis 数据流并按 `loop_flag` 配置循环。
 
+signal bgm_started(bgm_name: String)
+
 var _vfs: BgiVfs
 var _cfg: ConfigManager
 
@@ -13,6 +15,7 @@ var voice_player: AudioStreamPlayer
 
 var current_bgm: String = ""
 var current_bgm_loop: bool = false
+var current_voice_entry: String = ""
 
 
 func _init() -> void:
@@ -40,7 +43,8 @@ func apply_volumes() -> void:
 		return
 	bgm_player.volume_db = _linear_to_db_safe(_cfg.bgm_volume)
 	se_player.volume_db = _linear_to_db_safe(_cfg.se_volume)
-	voice_player.volume_db = _linear_to_db_safe(_cfg.voice_volume)
+	var v_mult := _cfg.get_char_voice_multiplier(current_voice_entry)
+	voice_player.volume_db = _linear_to_db_safe(_cfg.voice_volume * v_mult)
 
 
 func _linear_to_db_safe(val: float) -> float:
@@ -79,12 +83,17 @@ func play_bgm(entry_name: String) -> bool:
 	bgm_player.stream = stream
 	if is_inside_tree():
 		bgm_player.play()
+	bgm_started.emit(entry_name)
 	return true
 
 
 func stop_bgm() -> void:
 	bgm_player.stop()
 	current_bgm = ""
+
+
+func stop_voice() -> void:
+	voice_player.stop()
 
 
 func play_se(entry_name: String) -> bool:
@@ -105,6 +114,10 @@ func play_voice(entry_name: String) -> bool:
 		return false
 	var stream: AudioStreamOggVorbis = res["stream"]
 	stream.loop = false
+	current_voice_entry = entry_name
+	if _cfg != null:
+		var v_mult := _cfg.get_char_voice_multiplier(entry_name)
+		voice_player.volume_db = _linear_to_db_safe(_cfg.voice_volume * v_mult)
 	voice_player.stream = stream
 	if is_inside_tree():
 		voice_player.play()

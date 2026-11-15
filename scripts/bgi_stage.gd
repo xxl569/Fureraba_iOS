@@ -19,6 +19,7 @@ var _layer_asset_names: Dictionary = {} # layer_id (int) -> String
 var _layer_face_names: Dictionary = {} # layer_id (int) -> String
 var _layer_bgi_pos: Dictionary = {} # layer_id (int) -> Vector2
 var _quake_tween: Tween = null
+var screen_effect_mode: int = 0 # 0: 美观, 1: 快速, 2: OFF
 
 
 func _init() -> void:
@@ -97,10 +98,11 @@ func show_background(img_name: String) -> bool:
 	node.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	node.visible = true
 	_layer_asset_names[0] = img_name
-	if is_new and is_inside_tree():
+	if is_new and is_inside_tree() and screen_effect_mode < 2:
+		var dur := 0.22 if screen_effect_mode == 0 else 0.08
 		node.modulate.a = 0.0
 		var tw := create_tween()
-		tw.tween_property(node, "modulate:a", 1.0, 0.22)
+		tw.tween_property(node, "modulate:a", 1.0, dur)
 	else:
 		node.modulate.a = 1.0
 	return true
@@ -259,7 +261,7 @@ func trigger_quake(amplitude: float = 12.0, duration: float = 0.35) -> void:
 
 func handle_stage_command(cmd: String, args: Array) -> void:
 	match cmd:
-		"_DrawScene":
+		"_DrawScene", "_DrawBG":
 			if args.size() >= 1:
 				show_background(str(args[0]))
 		"_FadeScene":
