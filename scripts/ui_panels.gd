@@ -16,6 +16,7 @@ signal load_slot_requested(slot: int)
 signal config_changed()
 signal rescan_byoa_requested()
 signal start_new_game_requested()
+signal new_game_confirmed(skip_prologue: bool, family_name: String, given_name: String)
 signal play_op_requested()
 signal choice_selected(index: int)
 signal nude_quick_toggled()
@@ -95,6 +96,7 @@ var _is_save_mode: bool = true
 var _current_save_page: int = 0
 var _selected_slot: int = 0
 var _save_bg_rect: TextureRect
+var _save_page_cover: ColorRect
 var _save_title_lbl: Label
 var _page_buttons: Array[Button] = []
 var _slot_buttons: Array[Button] = []
@@ -103,6 +105,12 @@ var _slot_labels: Array[Label] = []
 var _preview_thumb: TextureRect
 var _preview_info: Label
 var _preview_action_btn: Button
+
+# 新游戏姓名输入与序章跳过弹窗
+var _name_input_overlay: Control
+var _family_input: LineEdit
+var _given_input: LineEdit
+var _prologue_skip_overlay: Control
 
 # Config 控件引用
 var _chk_uncensored: CheckButton
@@ -139,6 +147,7 @@ var _confirm_callback: Callable = Callable()
 func _init() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	z_index = 300 # 必须高于 BgiStage 的 256 个图元层 (z_index 0..255)
 	_build_dialogue_box()
 	_build_quick_menu()
 	_build_title_overlay()
@@ -419,6 +428,8 @@ func has_open_modal() -> bool:
 		or log_panel.visible
 		or gallery_panel.visible
 		or _confirm_overlay.visible
+		or (_name_input_overlay != null and _name_input_overlay.visible)
+		or (_prologue_skip_overlay != null and _prologue_skip_overlay.visible)
 	)
 
 
@@ -513,7 +524,7 @@ func _build_dialogue_box() -> void:
 
 	# 姓名栏 (270x40)
 	_name_plate = Control.new()
-	_name_plate.position = Vector2(54, 474)
+	_name_plate.position = Vector2(54, 480)
 	_name_plate.size = Vector2(270, 40)
 	_name_plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	dialogue_panel.add_child(_name_plate)
@@ -531,6 +542,8 @@ func _build_dialogue_box() -> void:
 	speaker_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	speaker_label.add_theme_font_size_override("font_size", 22)
 	speaker_label.add_theme_color_override("font_color", Color.WHITE)
+	speaker_label.add_theme_color_override("font_outline_color", Color(0.05, 0.16, 0.38, 0.95))
+	speaker_label.add_theme_constant_override("outline_size", 2)
 	speaker_label.add_theme_color_override("font_shadow_color", Color(0.05, 0.12, 0.3, 0.9))
 	speaker_label.add_theme_constant_override("shadow_offset_x", 1)
 	speaker_label.add_theme_constant_override("shadow_offset_y", 2)
@@ -538,10 +551,12 @@ func _build_dialogue_box() -> void:
 
 	# 对白正文区
 	dialogue_label = RichTextLabel.new()
-	dialogue_label.position = Vector2(82, 524)
-	dialogue_label.size = Vector2(910, 174)
+	dialogue_label.position = Vector2(86, 530)
+	dialogue_label.size = Vector2(900, 168)
 	dialogue_label.add_theme_font_size_override("normal_font_size", 26)
 	dialogue_label.add_theme_color_override("default_color", Color.WHITE)
+	dialogue_label.add_theme_color_override("font_outline_color", Color(0.04, 0.14, 0.34, 0.92))
+	dialogue_label.add_theme_constant_override("outline_size", 2)
 	dialogue_label.add_theme_color_override("font_shadow_color", Color(0.04, 0.1, 0.25, 0.95))
 	dialogue_label.add_theme_constant_override("shadow_offset_x", 1)
 	dialogue_label.add_theme_constant_override("shadow_offset_y", 2)
@@ -816,8 +831,8 @@ func _set_title_help(idx: int, fallback: String) -> void:
 
 func _on_title_btn_pressed(idx: int) -> void:
 	match idx:
-		0: # 从头开始
-			start_new_game_requested.emit()
+		0: # 从头开始（进入原版姓名输入与序章跳过流程）
+			_open_new_game_flow()
 		1: # 继续游戏 (读档)
 			open_system_menu("load", false)
 		2: # 系统
@@ -827,6 +842,14 @@ func _on_title_btn_pressed(idx: int) -> void:
 				gallery_panel.open_gallery(_title_op_btn != null and _title_op_btn.visible)
 		4: # 结束游戏
 			show_confirm("sgdialog990000", "确定结束游戏?", func() -> void: quit_game_requested.emit())
+
+
+func _open_new_game_flow() -> void:
+	if _name_input_overlay != null:
+		_name_input_overlay.visible = true
+		modal_backdrop.visible = true
+	else:
+		start_new_game_requested.emit()
 
 
 func _build_modals() -> void:
@@ -840,6 +863,7 @@ func _build_modals() -> void:
 	_build_log_panel()
 	_build_byoa_panel()
 	_build_choice_panel()
+	_build_new_game_overlays()
 
 	gallery_panel = _GalleryPanel.new()
 	gallery_panel.name = "GalleryPanel"
@@ -860,7 +884,7 @@ func _build_system_menu() -> void:
 
 	var bg := ColorRect.new()
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bg.color = Color(0.88, 0.95, 1.0, 0.96)
+	bg.color = Color(0.88, 0.95, 1.0, 1.0)
 	sys_menu_panel.add_child(bg)
 
 	# 主内容区 (左侧 1020x620)
@@ -871,6 +895,13 @@ func _build_system_menu() -> void:
 
 	_build_save_load_page(content_area)
 	_build_config_pages(content_area)
+
+	# 右侧常驻导航栏不透明底板（彻底遮盖 sgusdtwnd* 原图右侧假按钮重影）
+	var nav_bg := ColorRect.new()
+	nav_bg.position = Vector2(1038, 0)
+	nav_bg.size = Vector2(242, 720)
+	nav_bg.color = Color(0.90, 0.96, 1.0, 1.0)
+	sys_menu_panel.add_child(nav_bg)
 
 	# 右侧常驻导航栏 (210px 宽，对齐视频 00:08)
 	var nav_vbox := VBoxContainer.new()
@@ -917,6 +948,13 @@ func _build_system_menu() -> void:
 		nav_vbox.add_child(nb)
 		_sys_nav_buttons.append(nb)
 
+	# 底部 Help 不透明底板（彻底遮盖 sgusdtwnd* 原图底部红棕色 Help 条）
+	var help_bg := ColorRect.new()
+	help_bg.position = Vector2(0, 646)
+	help_bg.size = Vector2(1040, 74)
+	help_bg.color = Color(0.88, 0.95, 1.0, 1.0)
+	sys_menu_panel.add_child(help_bg)
+
 	# 底部 Help 栏
 	var help_panel := PanelContainer.new()
 	help_panel.position = Vector2(24, 654)
@@ -958,6 +996,13 @@ func _build_save_load_page(parent: Control) -> void:
 	_save_title_lbl.add_theme_color_override("font_shadow_color", Color(0.2, 0.05, 0.1, 0.8))
 	save_load_panel.add_child(_save_title_lbl)
 
+	# 左侧 1~10 页码不透明底板（遮盖原图左侧烘焙的 1~10 假按钮）
+	_save_page_cover = ColorRect.new()
+	_save_page_cover.position = Vector2(4, 50)
+	_save_page_cover.size = Vector2(62, 558)
+	_save_page_cover.color = Color(0.95, 0.56, 0.72, 1.0)
+	save_load_panel.add_child(_save_page_cover)
+
 	# 左侧 1~10 页码按钮
 	var page_vb := VBoxContainer.new()
 	page_vb.position = Vector2(10, 56)
@@ -969,6 +1014,21 @@ func _build_save_load_page(parent: Control) -> void:
 		pb.text = str(p + 1)
 		pb.toggle_mode = true
 		pb.custom_minimum_size = Vector2(46, 46)
+		var pst_n := StyleBoxFlat.new()
+		pst_n.bg_color = Color(1.0, 1.0, 1.0, 0.95)
+		pst_n.border_color = Color(0.85, 0.40, 0.55, 0.9)
+		pst_n.set_border_width_all(2)
+		pst_n.set_corner_radius_all(8)
+		pb.add_theme_stylebox_override("normal", pst_n)
+		var pst_p := pst_n.duplicate() as StyleBoxFlat
+		pst_p.bg_color = Color(0.92, 0.28, 0.52, 1.0)
+		pst_p.border_color = Color.WHITE
+		pb.add_theme_stylebox_override("pressed", pst_p)
+		pb.add_theme_stylebox_override("hover", pst_p)
+		pb.add_theme_color_override("font_color", Color(0.35, 0.12, 0.22))
+		pb.add_theme_color_override("font_pressed_color", Color.WHITE)
+		pb.add_theme_color_override("font_hover_color", Color.WHITE)
+		pb.add_theme_font_size_override("font_size", 18)
 		var p_idx := p
 		pb.pressed.connect(func() -> void: _switch_save_page(p_idx))
 		page_vb.add_child(pb)
@@ -1023,12 +1083,12 @@ func _build_save_load_page(parent: Control) -> void:
 		grid.add_child(sb)
 		_slot_buttons.append(sb)
 
-	# 右侧预览卡片
+	# 右侧预览卡片（完全不透明，遮盖原图右侧 コメント 假框）
 	var prev_box := PanelContainer.new()
 	prev_box.position = Vector2(700, 56)
 	prev_box.size = Vector2(300, 550)
 	var pst := StyleBoxFlat.new()
-	pst.bg_color = Color(0.15, 0.1, 0.16, 0.78)
+	pst.bg_color = Color(0.15, 0.1, 0.16, 0.98)
 	pst.border_color = Color(1, 1, 1, 0.65)
 	pst.set_border_width_all(2)
 	pst.set_corner_radius_all(12)
@@ -1118,12 +1178,7 @@ func _build_config_pages(parent: Control) -> void:
 	_preview_msg_box.add_child(prev_lbl)
 	vb_t.add_child(_preview_msg_box)
 
-	_chk_skip_unread = CheckButton.new()
-	_chk_skip_unread.name = "ChkSkipUnread"
-	_chk_skip_unread.text = "允许快进未读文本"
-	_chk_skip_unread.add_theme_color_override("font_color", Color(0.15, 0.28, 0.48))
-	_chk_skip_unread.add_theme_color_override("font_hover_color", Color(0.1, 0.2, 0.4))
-	_chk_skip_unread.add_theme_color_override("font_pressed_color", Color(0.1, 0.2, 0.4))
+	_chk_skip_unread = _make_styled_check("ChkSkipUnread", "允许快进未读文本")
 	_chk_skip_unread.toggled.connect(func(on: bool) -> void:
 		if _cfg != null: _cfg.skip_unread = on
 	)
@@ -1169,36 +1224,21 @@ func _build_config_pages(parent: Control) -> void:
 	_sys_pages["system"] = pg_sys
 	var vb_y := pg_sys.get_node("Inner") as VBoxContainer
 
-	_chk_uncensored = CheckButton.new()
-	_chk_uncensored.name = "ChkUncensored"
-	_chk_uncensored.text = "启用无码补丁优先挂载 (data02150.arc.bak)"
-	_chk_uncensored.add_theme_color_override("font_color", Color(0.15, 0.28, 0.48))
-	_chk_uncensored.add_theme_color_override("font_hover_color", Color(0.1, 0.2, 0.4))
-	_chk_uncensored.add_theme_color_override("font_pressed_color", Color(0.1, 0.2, 0.4))
+	_chk_uncensored = _make_styled_check("ChkUncensored", "启用无码补丁优先挂载 (data02150.arc.bak)")
 	_chk_uncensored.toggled.connect(func(on: bool) -> void:
 		if _cfg != null: _cfg.uncensored_mode = on
 		config_changed.emit()
 	)
 	vb_y.add_child(_chk_uncensored)
 
-	_chk_nude = CheckButton.new()
-	_chk_nude.name = "ChkNude"
-	_chk_nude.text = "启用透视 / 全裸差分开关 (F12 / 三指轻触)"
-	_chk_nude.add_theme_color_override("font_color", Color(0.15, 0.28, 0.48))
-	_chk_nude.add_theme_color_override("font_hover_color", Color(0.1, 0.2, 0.4))
-	_chk_nude.add_theme_color_override("font_pressed_color", Color(0.1, 0.2, 0.4))
+	_chk_nude = _make_styled_check("ChkNude", "启用透视 / 全裸差分开关 (F12 / 三指轻触)")
 	_chk_nude.toggled.connect(func(on: bool) -> void:
 		if _cfg != null: _cfg.nude_mode = on
 		config_changed.emit()
 	)
 	vb_y.add_child(_chk_nude)
 
-	_chk_confirm = CheckButton.new()
-	_chk_confirm.name = "ChkConfirm"
-	_chk_confirm.text = "快速存档/读档/返回标题前弹出确认框"
-	_chk_confirm.add_theme_color_override("font_color", Color(0.15, 0.28, 0.48))
-	_chk_confirm.add_theme_color_override("font_hover_color", Color(0.1, 0.2, 0.4))
-	_chk_confirm.add_theme_color_override("font_pressed_color", Color(0.1, 0.2, 0.4))
+	_chk_confirm = _make_styled_check("ChkConfirm", "快速存档/读档/返回标题前弹出确认框")
 	_chk_confirm.toggled.connect(func(on: bool) -> void:
 		if _cfg != null: _cfg.confirm_dialogs = on
 	)
@@ -1232,6 +1272,21 @@ func _build_config_pages(parent: Control) -> void:
 	key_lbl.add_theme_font_size_override("font_size", 18)
 	key_lbl.add_theme_color_override("font_color", Color(0.12, 0.25, 0.45))
 	vb_k.add_child(key_lbl)
+
+
+func _make_styled_check(node_name: String, label_txt: String) -> CheckButton:
+	var cb := CheckButton.new()
+	cb.name = node_name
+	cb.text = label_txt
+	cb.add_theme_font_size_override("font_size", 19)
+	var dark := Color(0.10, 0.22, 0.42)
+	cb.add_theme_color_override("font_color", dark)
+	cb.add_theme_color_override("font_focus_color", dark)
+	cb.add_theme_color_override("font_hover_color", dark)
+	cb.add_theme_color_override("font_pressed_color", dark)
+	cb.add_theme_color_override("font_hover_pressed_color", dark)
+	cb.add_theme_color_override("font_disabled_color", Color(0.45, 0.5, 0.6))
+	return cb
 
 
 func _make_cfg_card(title_txt: String, parent: Control) -> PanelContainer:
@@ -1354,6 +1409,8 @@ func _open_save_load(save_mode: bool) -> void:
 func _open_save_load_internal(save_mode: bool) -> void:
 	_is_save_mode = save_mode
 	_save_title_lbl.text = "存档 (Save)" if save_mode else "读档 (Load)"
+	if _save_page_cover != null:
+		_save_page_cover.color = Color(0.95, 0.56, 0.72, 1.0) if save_mode else Color(0.98, 0.68, 0.34, 1.0)
 	var bg_tex := theme_loader.get_tex("sgusdtwnd990000" if save_mode else "sgusdtwnd990001")
 	if bg_tex != null:
 		_save_bg_rect.texture = bg_tex
@@ -1575,6 +1632,145 @@ func _build_choice_panel() -> void:
 	add_child(choice_panel)
 
 
+func _build_new_game_overlays() -> void:
+	# 1. 请输入姓名弹窗（对应 PC 原版 01:44）
+	_name_input_overlay = Control.new()
+	_name_input_overlay.name = "NameInputOverlay"
+	_name_input_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_name_input_overlay.visible = false
+	add_child(_name_input_overlay)
+
+	var ncard := PanelContainer.new()
+	ncard.position = Vector2(220, 120)
+	ncard.size = Vector2(840, 480)
+	var nst := StyleBoxFlat.new()
+	nst.bg_color = Color(0.96, 0.80, 0.86, 0.98)
+	nst.border_color = Color.WHITE
+	nst.set_border_width_all(4)
+	nst.set_corner_radius_all(20)
+	nst.set_content_margin_all(32)
+	ncard.add_theme_stylebox_override("panel", nst)
+	_name_input_overlay.add_child(ncard)
+
+	var nvb := VBoxContainer.new()
+	nvb.alignment = BoxContainer.ALIGNMENT_CENTER
+	nvb.add_theme_constant_override("separation", 24)
+	ncard.add_child(nvb)
+
+	var ntitle := Label.new()
+	ntitle.text = "请输入姓名"
+	ntitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ntitle.add_theme_font_size_override("font_size", 32)
+	ntitle.add_theme_color_override("font_color", Color.WHITE)
+	ntitle.add_theme_color_override("font_shadow_color", Color(0.6, 0.2, 0.35, 0.8))
+	nvb.add_child(ntitle)
+
+	var nhb := HBoxContainer.new()
+	nhb.alignment = BoxContainer.ALIGNMENT_CENTER
+	nhb.add_theme_constant_override("separation", 24)
+	nvb.add_child(nhb)
+
+	var f_lbl := Label.new()
+	f_lbl.text = "姓："
+	f_lbl.add_theme_font_size_override("font_size", 24)
+	f_lbl.add_theme_color_override("font_color", Color(0.45, 0.15, 0.25))
+	nhb.add_child(f_lbl)
+
+	_family_input = LineEdit.new()
+	_family_input.text = "青叶"
+	_family_input.custom_minimum_size = Vector2(180, 48)
+	_family_input.add_theme_font_size_override("font_size", 22)
+	nhb.add_child(_family_input)
+
+	var g_lbl := Label.new()
+	g_lbl.text = "名："
+	g_lbl.add_theme_font_size_override("font_size", 24)
+	g_lbl.add_theme_color_override("font_color", Color(0.45, 0.15, 0.25))
+	nhb.add_child(g_lbl)
+
+	_given_input = LineEdit.new()
+	_given_input.text = "恭介"
+	_given_input.custom_minimum_size = Vector2(180, 48)
+	_given_input.add_theme_font_size_override("font_size", 22)
+	nhb.add_child(_given_input)
+
+	var btn_def := _make_pill_btn("默认", Vector2(180, 46))
+	btn_def.pressed.connect(func() -> void:
+		_family_input.text = "青叶"
+		_given_input.text = "恭介"
+	)
+	nvb.add_child(btn_def)
+
+	var btn_row_ok := HBoxContainer.new()
+	btn_row_ok.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_row_ok.add_theme_constant_override("separation", 24)
+	nvb.add_child(btn_row_ok)
+
+	var btn_cancel := _make_pill_btn("返回标题", Vector2(180, 50))
+	btn_cancel.pressed.connect(func() -> void:
+		_name_input_overlay.visible = false
+		_refresh_backdrop()
+	)
+	btn_row_ok.add_child(btn_cancel)
+
+	var btn_done := _make_pill_btn("结束输入", Vector2(200, 50))
+	btn_done.pressed.connect(func() -> void:
+		_name_input_overlay.visible = false
+		if _prologue_skip_overlay != null:
+			_prologue_skip_overlay.visible = true
+			modal_backdrop.visible = true
+		else:
+			_refresh_backdrop()
+			new_game_confirmed.emit(false, _family_input.text, _given_input.text)
+	)
+	btn_row_ok.add_child(btn_done)
+
+	# 2. 要跳过序章吗？选择弹窗（对应 PC 原版 01:51）
+	_prologue_skip_overlay = Control.new()
+	_prologue_skip_overlay.name = "PrologueSkipOverlay"
+	_prologue_skip_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_prologue_skip_overlay.visible = false
+	add_child(_prologue_skip_overlay)
+
+	var sky := ColorRect.new()
+	sky.set_anchors_preset(Control.PRESET_FULL_RECT)
+	sky.color = Color(0.28, 0.68, 0.96, 0.96)
+	_prologue_skip_overlay.add_child(sky)
+
+	var pvb := VBoxContainer.new()
+	pvb.position = Vector2(240, 180)
+	pvb.size = Vector2(800, 320)
+	pvb.alignment = BoxContainer.ALIGNMENT_CENTER
+	pvb.add_theme_constant_override("separation", 26)
+	_prologue_skip_overlay.add_child(pvb)
+
+	var p_lbl := Label.new()
+	p_lbl.text = "要跳过序章吗？"
+	p_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	p_lbl.add_theme_font_size_override("font_size", 32)
+	p_lbl.add_theme_color_override("font_color", Color.WHITE)
+	p_lbl.add_theme_color_override("font_shadow_color", Color(0.05, 0.2, 0.45, 0.85))
+	pvb.add_child(p_lbl)
+
+	var btn_pro := _make_pill_btn("从序章开始", Vector2(560, 62))
+	btn_pro.add_theme_font_size_override("font_size", 24)
+	btn_pro.pressed.connect(func() -> void:
+		_prologue_skip_overlay.visible = false
+		_refresh_backdrop()
+		new_game_confirmed.emit(false, _family_input.text, _given_input.text)
+	)
+	pvb.add_child(btn_pro)
+
+	var btn_daily := _make_pill_btn("从日常部分开始", Vector2(560, 62))
+	btn_daily.add_theme_font_size_override("font_size", 24)
+	btn_daily.pressed.connect(func() -> void:
+		_prologue_skip_overlay.visible = false
+		_refresh_backdrop()
+		new_game_confirmed.emit(true, _family_input.text, _given_input.text)
+	)
+	pvb.add_child(btn_daily)
+
+
 func _build_confirm_dialog() -> void:
 	_confirm_overlay = Control.new()
 	_confirm_overlay.name = "ConfirmDialogOverlay"
@@ -1722,6 +1918,10 @@ func _close_all_modals() -> void:
 	if gallery_panel != null:
 		gallery_panel.visible = false
 	_confirm_overlay.visible = false
+	if _name_input_overlay != null:
+		_name_input_overlay.visible = false
+	if _prologue_skip_overlay != null:
+		_prologue_skip_overlay.visible = false
 	_refresh_backdrop()
 
 
@@ -1732,4 +1932,6 @@ func _refresh_backdrop() -> void:
 		or log_panel.visible
 		or choice_panel.visible
 		or _confirm_overlay.visible
+		or (_name_input_overlay != null and _name_input_overlay.visible)
+		or (_prologue_skip_overlay != null and _prologue_skip_overlay.visible)
 	)

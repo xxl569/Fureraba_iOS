@@ -79,19 +79,49 @@ func _init() -> void:
 		quit(8)
 		return
 
-	# 6. 验证附录 CG/BGM 鉴赏面板
+	# 6. 验证附录 CG/BGM 鉴赏面板与女主名称
 	main.ui.gallery_panel.open_gallery(true)
 	if not main.ui.gallery_panel.visible:
 		push_error("Gallery panel failed to open")
 		quit(9)
 		return
+	if str(main.ui.gallery_panel.CHAR_TABS[0]["name"]) != "皆原 陽茉莉":
+		push_error("Gallery char[0] name mismatch")
+		quit(9)
+		return
 	main.ui.gallery_panel.visible = false
 
-	# 7. 验证返回标题
+	# 7. 验证返回标题与新游戏姓名输入/跳过序章流程
 	main._return_to_title()
 	if not main.ui.title_overlay.visible:
 		push_error("Return to title failed")
 		quit(10)
+		return
+
+	main.ui._on_title_btn_pressed(0)
+	if not main.ui._name_input_overlay.visible:
+		push_error("Name input overlay did not open")
+		quit(11)
+		return
+	main.ui._name_input_overlay.visible = false
+	main._on_new_game_confirmed(true, "青叶", "恭介")
+	if main.vm.current_script != "b_days_0422":
+		push_error("Skip prologue failed to enter b_days_0422: " + main.vm.current_script)
+		quit(12)
+		return
+
+	# 8. 验证立绘快照导出与恢复
+	main.stage.show_bustshot(1, "hi01wa_n", 0.0, 250.0)
+	var bs_snap: Array = main.stage.export_bustshots_state()
+	if bs_snap.size() != 1:
+		push_error("Bustshot snapshot export failed")
+		quit(13)
+		return
+	main.stage.clear_all_bustshots()
+	main.stage.import_bustshots_state(bs_snap)
+	if main.stage.export_bustshots_state().size() != 1:
+		push_error("Bustshot snapshot import failed")
+		quit(14)
 		return
 
 	main.queue_free()

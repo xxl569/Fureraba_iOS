@@ -9,7 +9,7 @@ signal stop_bgm_requested()
 signal play_op_requested()
 
 const CHAR_TABS := [
-	{"name": "皆原 悠里奈", "prefix": "hiev", "btn": "sggallery100001"},
+	{"name": "皆原 陽茉莉", "prefix": "hiev", "btn": "sggallery100001"},
 	{"name": "望月 理奈", "prefix": "riev", "btn": "sggallery100101"},
 	{"name": "柊 ゆずゆ", "prefix": "yuev", "btn": "sggallery100201"},
 	{"name": "沢渡 岬", "prefix": "miev", "btn": "sggallery100301"},
@@ -132,13 +132,13 @@ func _build_ui() -> void:
 	_cg_grid.add_theme_constant_override("v_separation", 10)
 	add_child(_cg_grid)
 
-	# 底部角色切换与 BGM 播放器整洁底板（遮盖原图底部不可交互的假按钮）
+	# 底部角色切换与 BGM 播放器整洁底板（完全不透明，彻底遮盖原图底部假按钮）
 	var bottom_bg := Panel.new()
 	bottom_bg.position = Vector2(44, 434)
 	bottom_bg.size = Vector2(1192, 260)
 	var btm_st := StyleBoxFlat.new()
-	btm_st.bg_color = Color(0.76, 0.90, 0.99, 0.94)
-	btm_st.border_color = Color(1, 1, 1, 0.85)
+	btm_st.bg_color = Color(0.84, 0.94, 1.0, 1.0)
+	btm_st.border_color = Color(1, 1, 1, 0.95)
 	btm_st.set_border_width_all(2)
 	btm_st.set_corner_radius_all(16)
 	bottom_bg.add_theme_stylebox_override("panel", btm_st)
@@ -328,11 +328,19 @@ func _render_cg_page() -> void:
 		var btn := TextureButton.new()
 		btn.custom_minimum_size = Vector2(160, 90)
 		btn.ignore_texture_size = true
-		btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_COVERED
 		var img := _vfs.decode_image(cg_name) if _vfs != null else null
 		if img != null:
-			img.resize(160, 90, Image.INTERPOLATE_BILINEAR)
+			var iw := img.get_width()
+			var ih := img.get_height()
+			var aspect := float(maxi(iw, ih)) / float(maxi(mini(iw, ih), 1))
+			# 等比缩放到合适缩略图尺寸，严禁破坏宽高比
+			if iw > 320 or ih > 320:
+				var sc := 320.0 / float(maxi(iw, ih))
+				img.resize(maxi(1, int(round(iw * sc))), maxi(1, int(round(ih * sc))), Image.INTERPOLATE_BILINEAR)
+			btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED if aspect > 2.2 else TextureButton.STRETCH_KEEP_ASPECT_COVERED
 			btn.texture_normal = ImageTexture.create_from_image(img)
+		else:
+			btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_COVERED
 		var cg_idx := i
 		btn.pressed.connect(func() -> void: _open_cg_viewer(cg_idx))
 		_cg_grid.add_child(btn)

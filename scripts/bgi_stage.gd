@@ -190,6 +190,43 @@ func clear_all_bustshots() -> void:
 			clear_layer(int(lid))
 
 
+func export_bustshots_state() -> Array:
+	var out: Array = []
+	for lid_v in _layer_asset_names.keys():
+		var lid := int(lid_v)
+		if lid < 1 or lid >= 200:
+			continue
+		var ctrl: Control = _layer_nodes.get(lid_v)
+		if not (ctrl is TextureRect) or not ctrl.visible:
+			continue
+		var pos: Vector2 = _layer_bgi_pos.get(lid_v, Vector2(0.0, 250.0))
+		out.append({
+			"lid": lid,
+			"body": str(_layer_asset_names[lid_v]),
+			"face": str(_layer_face_names.get(lid_v, "")),
+			"x": pos.x,
+			"y": pos.y,
+			"a": ctrl.modulate.a,
+		})
+	return out
+
+
+func import_bustshots_state(items: Array) -> void:
+	clear_all_bustshots()
+	for it in items:
+		if typeof(it) != TYPE_DICTIONARY:
+			continue
+		var lid := int(it.get("lid", 1))
+		var body := str(it.get("body", ""))
+		var face := str(it.get("face", ""))
+		var bx := float(it.get("x", 0.0))
+		var by := float(it.get("y", 250.0))
+		var alpha := float(it.get("a", 1.0))
+		if not body.is_empty() and show_bustshot(lid, body, bx, by, face):
+			if _layer_nodes.has(lid):
+				_layer_nodes[lid].modulate.a = alpha
+
+
 func refresh_nude_layers() -> void:
 	for lid in _layer_asset_names.keys().duplicate():
 		var asset_name := str(_layer_asset_names[lid])

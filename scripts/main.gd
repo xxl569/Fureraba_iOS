@@ -137,7 +137,10 @@ func _process(delta: float) -> void:
 
 func _connect_signals() -> void:
 	vm.dialogue_printed.connect(func(text: String, speaker: String, _w: bool) -> void:
-		var snap := vm.export_save_state() if DisplayServer.get_name() != "headless" else {}
+		var snap := {}
+		if DisplayServer.get_name() != "headless":
+			snap = vm.export_save_state()
+			snap["bustshots"] = stage.export_bustshots_state()
 		ui.set_dialogue(text, speaker, vm.last_voice_entry, snap)
 	)
 	vm.stage_command.connect(stage.handle_stage_command)
@@ -164,6 +167,7 @@ func _connect_signals() -> void:
 	ui.config_changed.connect(_on_config_changed)
 	ui.rescan_byoa_requested.connect(_try_mount_and_init)
 	ui.start_new_game_requested.connect(start_new_game)
+	ui.new_game_confirmed.connect(_on_new_game_confirmed)
 	ui.play_op_requested.connect(_play_opening_movie)
 	ui.choice_selected.connect(func(idx: int) -> void:
 		vm.resume_with_choice(idx)
@@ -219,6 +223,18 @@ func _return_to_title() -> void:
 	audio_mgr.voice_player.stop()
 	audio_mgr.stop_bgm()
 	_show_title_screen()
+
+
+func _on_new_game_confirmed(skip_prologue: bool, _family_name: String, _given_name: String) -> void:
+	if not vfs.is_ready():
+		return
+	ui.hide_title_menu()
+	_in_game = true
+	_set_auto_mode(false)
+	_set_skip_mode(false)
+	var entry := "b_days_0422" if (skip_prologue and vfs.has_entry("b_days_0422")) else "a_prologue01"
+	vm.start_script(entry, 0, true)
+	vm.step_until_wait()
 
 
 func start_new_game() -> void:
@@ -301,6 +317,7 @@ func _on_save_slot(slot: int) -> void:
 		return
 	var payload := vm.export_save_state()
 	payload["read_state"] = bp_vm.export_read_state()
+	payload["bustshots"] = stage.export_bustshots_state()
 	payload["timestamp"] = Time.get_datetime_string_from_system()
 	var shot: Image = null
 	if DisplayServer.get_name() != "headless" and get_viewport() != null:
@@ -333,6 +350,9 @@ func _restore_from_snapshot(payload: Dictionary) -> void:
 		stage.clear_all_bustshots()
 		if not vm.last_bg.is_empty():
 			stage.show_background(vm.last_bg)
+		var bs: Variant = payload.get("bustshots", [])
+		if typeof(bs) == TYPE_ARRAY and not (bs as Array).is_empty():
+			stage.import_bustshots_state(bs as Array)
 		if not vm.last_bgm.is_empty():
 			audio_mgr.play_bgm(vm.last_bgm)
 		if not vm.last_dialogue_text.is_empty():
