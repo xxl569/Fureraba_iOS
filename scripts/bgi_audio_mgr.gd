@@ -16,6 +16,7 @@ var voice_player: AudioStreamPlayer
 var current_bgm: String = ""
 var current_bgm_loop: bool = false
 var current_voice_entry: String = ""
+var current_voice_script_vol: float = 1.0
 
 
 func _init() -> void:
@@ -44,7 +45,7 @@ func apply_volumes() -> void:
 	bgm_player.volume_db = _linear_to_db_safe(_cfg.bgm_volume)
 	se_player.volume_db = _linear_to_db_safe(_cfg.se_volume)
 	var v_mult := _cfg.get_char_voice_multiplier(current_voice_entry)
-	voice_player.volume_db = _linear_to_db_safe(_cfg.voice_volume * v_mult)
+	voice_player.volume_db = _linear_to_db_safe(_cfg.voice_volume * v_mult * current_voice_script_vol)
 
 
 func _linear_to_db_safe(val: float) -> float:
@@ -120,16 +121,17 @@ func play_se(entry_name: String) -> bool:
 	return true
 
 
-func play_voice(entry_name: String) -> bool:
+func play_voice(entry_name: String, script_vol_ratio: float = 1.0) -> bool:
 	var res := load_ogg_stream(entry_name)
 	if not bool(res.get("ok", false)):
 		return false
 	var stream: AudioStreamOggVorbis = res["stream"]
 	stream.loop = false
 	current_voice_entry = entry_name
+	current_voice_script_vol = clampf(script_vol_ratio, 0.0, 1.0)
 	if _cfg != null:
 		var v_mult := _cfg.get_char_voice_multiplier(entry_name)
-		voice_player.volume_db = _linear_to_db_safe(_cfg.voice_volume * v_mult)
+		voice_player.volume_db = _linear_to_db_safe(_cfg.voice_volume * v_mult * current_voice_script_vol)
 	voice_player.stop()
 	voice_player.stream = stream
 	if is_inside_tree() and DisplayServer.get_name() != "headless":
@@ -142,13 +144,24 @@ func handle_audio_command(cmd: String, args: Array) -> void:
 		"_PlayBGM":
 			if args.size() >= 2:
 				play_bgm(str(args[1]))
-		"_FadeBGM":
+		"_FadeBGM", "_StopBGM":
 			stop_bgm()
 		"_PlaySE", "_PlayStreamSE":
 			if args.size() >= 2:
 				play_se(str(args[1]))
-		"_FadeSE", "_FadeStreamSE":
+		"_FadeSE", "_FadeStreamSE", "_StopSE", "_StopStreamSE":
 			se_player.stop()
 		"_PlayVoice":
-			if args.size() >= 1:
-				play_voice(str(args[0]))
+			# BGI _PlayVoice 参数约定：[0]=通道, [1]=语音条目名, [2]=脚本音量(0..100), [3]=-1
+			var entry := ""
+			var vol_ratio := 1.0
+			if args.size() >= 2:
+				entry = str(args[1])
+				if args.size() >= 3:
+					vol_ratio = clampf(float(args[2]) / 100.0, 0.0, 1.0)
+			elif args.size() == 1 and typeof(args[0]) == TYPE_STRING:
+				entry = str(args[0])
+			if not entry.is_empty():
+				play_voice(entry, vol_ratio)
+		"_StopVoice":
+			stop_voice()

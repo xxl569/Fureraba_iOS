@@ -268,6 +268,8 @@ func start_script(name: String, entry_offset: int = 0, reset_state: bool = true)
 		_sys_work.clear()
 		_pending_read_script = ""
 		_pending_read_line = -1
+		last_voice_entry = ""
+		last_face_img = ""
 		_sp = 0x10000
 		wait_state = WaitState.NONE
 		wait_timer_sec = 0.0
@@ -723,8 +725,11 @@ func _handle_builtin_external(fn_name: String) -> void:
 			var args := _pop_all_frame_args(7)
 			audio_command.emit(fn_name, args)
 		"_PlayVoice":
+			# BGI _PlayVoice 参数栈（底->顶）：[0]=通道索引, [1]=语音条目名, [2]=脚本音量(0..100), [3]=标志(-1)
 			var args := _pop_all_frame_args(4)
-			if args.size() >= 1:
+			if args.size() >= 2:
+				last_voice_entry = str(args[1])
+			elif args.size() == 1 and typeof(args[0]) == TYPE_STRING:
 				last_voice_entry = str(args[0])
 			audio_command.emit(fn_name, args)
 		"_FadeSE", "_WaitToFinishSE":

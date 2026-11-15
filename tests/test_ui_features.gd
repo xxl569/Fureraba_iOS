@@ -566,6 +566,213 @@ func _init() -> void:
 	main.bp_vm._read_bits = bk_bits
 	main.bp_vm._read_dirty = false
 
+	# 26. 回归验证：标题界面 -> 设置 / 读档 / 鉴赏 导航按钮「返回游戏」「返回标题」与 ESC 行为
+	main.cfg.reset_to_defaults()
+	main._return_to_title()
+	await process_frame
+	if main._in_game or not main.ui.title_overlay.visible:
+		push_error("return_to_title did not show title overlay")
+		quit(68)
+		return
+
+	# 26a) 标题点「系统设置」(TitleBtn_2) -> 检查按钮禁用态，再点「返回游戏」
+	var title_btn_cfg := main.ui.title_overlay.find_child("TitleBtn_2", true, false) as BaseButton
+	if title_btn_cfg == null:
+		push_error("Missing TitleBtn_2")
+		quit(69)
+		return
+	title_btn_cfg.pressed.emit()
+	await process_frame
+	if not main.ui.sys_menu_panel.visible:
+		push_error("TitleBtn_2 did not open sys_menu_panel")
+		quit(70)
+		return
+	var nav_save := main.ui._sys_nav_map.get("save") as BaseButton
+	var nav_back_game := main.ui._sys_nav_map.get("back_game") as BaseButton
+	var nav_back_title := main.ui._sys_nav_map.get("back_title") as BaseButton
+	if nav_save == null or not nav_save.disabled:
+		push_error("SysNav save should remain disabled when opened from title")
+		quit(71)
+		return
+	if nav_back_game == null or nav_back_game.disabled or nav_back_title == null or nav_back_title.disabled:
+		push_error("SysNav back_game/back_title must remain enabled when opened from title")
+		quit(72)
+		return
+	nav_back_game.pressed.emit()
+	await process_frame
+	if main.ui.sys_menu_panel.visible or not main.ui.title_overlay.visible or main.ui.modal_backdrop.visible:
+		push_error("SysNav back_game from title->settings failed to return cleanly to title")
+		quit(73)
+		return
+
+	# 26b) 标题点「系统设置」 -> 点「返回标题」应直接关闭设置并返回标题（不弹多余确认）
+	title_btn_cfg.pressed.emit()
+	await process_frame
+	nav_back_title.pressed.emit()
+	await process_frame
+	if main.ui.sys_menu_panel.visible or main.ui._confirm_overlay.visible or not main.ui.title_overlay.visible:
+		push_error("SysNav back_title from title->settings failed to return directly to title")
+		quit(74)
+		return
+
+	# 26c) 标题点「继续游戏」(TitleBtn_1 -> load 页) -> ESC 关闭设置回到标题
+	var title_btn_load := main.ui.title_overlay.find_child("TitleBtn_1", true, false) as BaseButton
+	if title_btn_load == null:
+		push_error("Missing TitleBtn_1")
+		quit(75)
+		return
+	title_btn_load.pressed.emit()
+	await process_frame
+	if not main.ui.sys_menu_panel.visible:
+		push_error("TitleBtn_1 did not open load page")
+		quit(76)
+		return
+	var esc_title_settings := InputEventKey.new()
+	esc_title_settings.keycode = KEY_ESCAPE
+	esc_title_settings.pressed = true
+	main._unhandled_input(esc_title_settings)
+	await process_frame
+	if main.ui.sys_menu_panel.visible or not main.ui.title_overlay.visible:
+		push_error("ESC did not close settings opened from title")
+		quit(77)
+		return
+
+	# 26d) 标题点「鉴赏模式」(TitleBtn_3) -> 点返回应回到标题
+	var title_btn_gal := main.ui.title_overlay.find_child("TitleBtn_3", true, false) as BaseButton
+	if title_btn_gal != null:
+		title_btn_gal.pressed.emit()
+		await process_frame
+		if not main.ui.gallery_panel.visible:
+			push_error("TitleBtn_3 did not open gallery_panel")
+			quit(78)
+			return
+		var gal_back := main.ui.gallery_panel.find_child("BtnGalleryBack", true, false) as BaseButton
+		if gal_back == null:
+			push_error("Missing BtnGalleryBack")
+			quit(79)
+			return
+		gal_back.pressed.emit()
+		await process_frame
+		if main.ui.gallery_panel.visible or not main.ui.title_overlay.visible or main.ui.modal_backdrop.visible:
+			push_error("BtnGalleryBack failed to return cleanly to title")
+			quit(80)
+			return
+
+	# 26e) 游戏内打开设置 -> back_game 返回游戏；back_title 弹窗确认后回到标题
+	main.start_new_game()
+	await process_frame
+	main.ui.open_system_menu("display", true)
+	await process_frame
+	if nav_save.disabled or nav_back_game.disabled or nav_back_title.disabled:
+		push_error("In-game settings nav buttons should all be enabled")
+		quit(81)
+		return
+	nav_back_game.pressed.emit()
+	await process_frame
+	if main.ui.sys_menu_panel.visible or main.ui.title_overlay.visible or not main._in_game:
+		push_error("In-game back_game failed to return to game")
+		quit(82)
+		return
+	main.ui.open_system_menu("display", true)
+	await process_frame
+	nav_back_title.pressed.emit()
+	await process_frame
+	if not main.ui._confirm_overlay.visible:
+		push_error("In-game back_title should show confirm dialog")
+		quit(83)
+		return
+	var confirm_yes := main.ui._confirm_overlay.find_child("BtnConfirmYes", true, false) as BaseButton
+	if confirm_yes == null:
+		push_error("Missing BtnConfirmYes")
+		quit(84)
+		return
+	confirm_yes.pressed.emit()
+	await process_frame
+	if main._in_game or not main.ui.title_overlay.visible or main.ui.sys_menu_panel.visible:
+		push_error("Confirming in-game back_title failed to return to title")
+		quit(85)
+		return
+
+	# 27. 回归验证：真实剧本人物语音解析、Ogg 加载、独立角色音量、Backlog 重听、_StopVoice
+	main.cfg.reset_to_defaults()
+	main.start_new_game()
+	if not main.vm.start_script("b_days_0422"):
+		push_error("Failed to start b_days_0422")
+		quit(85)
+		return
+	var found_yu_voice := false
+	for _step_i in range(600):
+		var ws: int = main.vm.step_until_wait(3000)
+		if ws == BgiVm.WaitState.CLICK:
+			if not main.vm.last_voice_entry.is_empty():
+				if main.vm.last_voice_entry == "0":
+					push_error("Regression: last_voice_entry captured channel '0' instead of voice entry name")
+					quit(86)
+					return
+				if not str(main.vm.last_voice_entry).begins_with("DAYS_0422_"):
+					push_error("Unexpected voice entry from b_days_0422: " + str(main.vm.last_voice_entry))
+					quit(86)
+					return
+				if main.audio_mgr.current_voice_entry != main.vm.last_voice_entry or not (main.audio_mgr.voice_player.stream is AudioStreamOggVorbis):
+					push_error("Voice stream not loaded for real script line: " + main.vm.last_voice_entry)
+					quit(87)
+					return
+				found_yu_voice = true
+				break
+			main.vm.resume_from_click()
+		elif ws == BgiVm.WaitState.TIMER:
+			main.vm.resume_from_click()
+		elif ws == BgiVm.WaitState.CHOICE:
+			main.vm.resume_with_choice(0)
+		else:
+			break
+	if not found_yu_voice:
+		push_error("Failed to hit a voiced line while stepping b_days_0422")
+		quit(88)
+		return
+
+	# 27b) 验证 Backlog 记录真实 voice_entry 且点击重听按钮可触发播放
+	var real_voice: String = str(main.vm.last_voice_entry)
+	main.audio_mgr.stop_voice()
+	main.ui.set_dialogue("测试语音回放台词", "ゆずゆ", real_voice, {}, false, "")
+	main.ui._open_log_panel()
+	await process_frame
+	var replay_btn: TextureButton = null
+	for card in main.ui._log_list_vbox.get_children():
+		for sub in card.find_children("*", "TextureButton", true, false):
+			replay_btn = sub as TextureButton
+	if replay_btn == null:
+		push_error("Backlog panel did not build voice replay button for " + real_voice)
+		quit(89)
+		return
+	replay_btn.pressed.emit()
+	await process_frame
+	if main.audio_mgr.current_voice_entry != real_voice or not (main.audio_mgr.voice_player.stream is AudioStreamOggVorbis):
+		push_error("Backlog replay button failed to load voice stream: " + real_voice)
+		quit(90)
+		return
+	main.ui._close_all_modals()
+
+	# 27c) 验证角色独立音量、脚本第 3 参数音量以及 _StopVoice 指令
+	main.cfg.voice_volume = 1.0
+	main.cfg.char_voice_volumes["yu"] = 0.5
+	main.audio_mgr.handle_audio_command("_PlayVoice", [0, "DAYS_0422_#YU_001", 80, -1])
+	var expected_db := linear_to_db(0.5 * 0.8)
+	if (
+		main.audio_mgr.current_voice_entry != "DAYS_0422_#YU_001"
+		or absf(main.audio_mgr.current_voice_script_vol - 0.8) > 0.01
+		or absf(main.audio_mgr.voice_player.volume_db - expected_db) > 0.05
+		or not (main.audio_mgr.voice_player.stream is AudioStreamOggVorbis)
+	):
+		push_error("Character/script voice volume scaling mismatch")
+		quit(91)
+		return
+	main.audio_mgr.handle_audio_command("_StopVoice", [0])
+	if main.audio_mgr.voice_player.stream != null:
+		push_error("_StopVoice command did not clear voice_player.stream")
+		quit(92)
+		return
+
 	main.cfg.reset_to_defaults()
 	main.cfg.save_config()
 	main.queue_free()

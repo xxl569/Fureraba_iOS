@@ -715,6 +715,19 @@ func has_open_modal() -> bool:
 	)
 
 
+## 判断是否存在可通过 ESC 或返回键关闭的子弹窗（不含标题主覆盖层与剧情选项弹窗）
+func has_closable_submodal() -> bool:
+	return (
+		sys_menu_panel.visible
+		or log_panel.visible
+		or gallery_panel.visible
+		or (byoa_panel != null and byoa_panel.visible)
+		or _confirm_overlay.visible
+		or (_name_input_overlay != null and _name_input_overlay.visible)
+		or (_prologue_skip_overlay != null and _prologue_skip_overlay.visible)
+	)
+
+
 func open_log_panel() -> void:
 	_open_log_panel()
 
@@ -1284,6 +1297,12 @@ func _build_modals() -> void:
 	gallery_panel.recollection_requested.connect(func(sc: String, app: int) -> void:
 		recollection_requested.emit(sc, app)
 	)
+	# 从标题进入鉴赏模式点击返回后，刷新遮罩并确保标题覆盖层可见
+	gallery_panel.close_requested.connect(func() -> void:
+		if not _sys_in_game and title_overlay != null:
+			title_overlay.visible = true
+		_refresh_backdrop()
+	)
 	add_child(gallery_panel)
 
 	_build_confirm_dialog()
@@ -1434,11 +1453,23 @@ func _on_sys_nav_pressed(key: String) -> void:
 				_cfg.save_config()
 			config_changed.emit()
 			_close_all_modals()
+			# 从标题进入设置或读档时，「返回游戏」同样应安全关闭设置页并恢复标题界面
+			if not _sys_in_game and title_overlay != null:
+				title_overlay.visible = true
 		"back_title":
-			show_confirm("sgdialog990001", "确定回到标题？", func() -> void:
+			if not _sys_in_game:
+				# 已经在标题界面进入设置时，直接保存配置、关闭设置页并确保标题界面可见
+				if _cfg != null:
+					_cfg.save_config()
+				config_changed.emit()
 				_close_all_modals()
-				return_to_title_requested.emit()
-			)
+				if title_overlay != null:
+					title_overlay.visible = true
+			else:
+				show_confirm("sgdialog990001", "确定回到标题？", func() -> void:
+					_close_all_modals()
+					return_to_title_requested.emit()
+				)
 		"quit":
 			show_confirm("sgdialog990000", "确定结束游戏?", func() -> void: quit_game_requested.emit())
 		"reset":
@@ -1454,11 +1485,16 @@ func _on_sys_nav_pressed(key: String) -> void:
 
 
 func _refresh_sys_nav_state() -> void:
-	for k in ["save", "back_game", "back_title"]:
+	# 未进入正文前仅禁用「存档」，确保「返回游戏」「返回标题」在标题->设置/读档路径下始终可点击
+	var save_btn := _sys_nav_map.get("save") as BaseButton
+	if save_btn != null:
+		save_btn.disabled = not _sys_in_game
+		save_btn.modulate.a = 1.0 if _sys_in_game else 0.55
+	for k in ["back_game", "back_title"]:
 		var nb := _sys_nav_map.get(k) as BaseButton
 		if nb != null:
-			nb.disabled = not _sys_in_game
-			nb.modulate.a = 1.0 if _sys_in_game else 0.55
+			nb.disabled = false
+			nb.modulate.a = 1.0
 
 
 func _switch_sys_page(key: String) -> void:

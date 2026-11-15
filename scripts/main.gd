@@ -93,7 +93,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		if kc == KEY_ESCAPE:
-			if ui.has_open_modal() and not ui.title_overlay.visible:
+			if ui.has_closable_submodal():
 				ui._close_all_modals()
 			elif _in_recollection:
 				ui.show_confirm("sgdialog990010", "确定回到CG模式？", _end_recollection_to_gallery)
